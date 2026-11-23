@@ -79,6 +79,8 @@ Buildozer 官方仅支持 Linux，Windows 用户推荐两种方式。
 3. 推送一个 tag（如 `v1.0`）或手动触发：
    - 打开仓库 **Actions** → **Build APK** → **Run workflow**。
 4. 编译完成后，在 Actions 页面下载 `apk` 产物，解压得到 `bin/*.apk`，传到手机安装。
+   （推送 `v*` 标签时会自动生成/更新对应的 GitHub Release，
+   仓库公开时可**免登录**直接从 Release 页面下载 APK。）
 
 ### 方式 B：WSL2 + Ubuntu 本地编译
 
