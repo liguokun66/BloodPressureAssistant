@@ -75,4 +75,4 @@ jobs:
           cp "$GITHUB_WORKSPACE/build.log" "ci-logs/run-${GITHUB_RUN_NUMBER}.log"
           git add ci-logs
           git commit -m "ci: build log for run ${GITHUB_RUN_NUMBER}" || true
-          git push "https://x-access-token:${GH_TOKEN}@github.com/liguokun66/BloodPressureAssistant.git" ci-logs || true
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/liguokun66/BloodPressureAssistant.git" ci-logs || true
