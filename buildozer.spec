@@ -29,8 +29,9 @@ requirements = python3,kivy==2.2.1,pyjnius
 # 屏幕方向
 orientation = portrait
 
-# 不全屏
-fullscreen = 0
+# 全屏显示：避开 Android 系统导航栏 / 状态栏遮挡底部区域
+# （否则底部导航与屏幕最下方控件可能被系统栏盖住而点不中）
+fullscreen = 1
 
 # Android 权限
 android.permissions = RECORD_AUDIO,INTERNET

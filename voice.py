@@ -9,6 +9,8 @@
 import threading
 import traceback
 
+from kivy.logger import Logger
+
 
 class VoiceRecognizer:
     """语音识别封装，支持 Android / 桌面"""
@@ -109,10 +111,21 @@ class VoiceRecognizer:
 
     # ---------------- Android 实现 ----------------
     def _start_android(self):
+        """先切回主线程再启动：SpeechRecognizer 必须在主线程创建，
+        否则部分机型会抛 “SpeechRecognizer should be used only with the
+        main thread”。"""
+        try:
+            from kivy.clock import Clock
+            Clock.schedule_once(lambda dt: self._start_android_ui(), 0)
+        except Exception:
+            self._start_android_ui()
+
+    def _start_android_ui(self):
         try:
             from jnius import autoclass, PythonJavaClass, java_method
         except Exception as e:
-            self._fire_error('无法加载语音组件：%s' % e)
+            self._fire_error('无法加载语音组件：%s（%s）'
+                             % (type(e).__name__, e))
             return
 
         Intent = autoclass('android.content.Intent')
@@ -132,12 +145,15 @@ class VoiceRecognizer:
             return
         try:
             if not SpeechRecognizer.isRecognitionAvailable(activity):
-                self._fire_error('当前设备没有可用的语音识别服务，\n'
-                                 '（部分机型需安装/启用 Google 语音识别）\n'
-                                 '请使用键盘输入。')
+                self._fire_error('当前设备没有可用的语音识别服务。\n\n'
+                                 '常见原因：\n'
+                                 '· 厂商系统删除了 Google 语音识别\n'
+                                 '· 未安装支持中文的输入法/识别服务\n\n'
+                                 '可先用键盘输入，或在系统里启用语音识别服务。')
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            Logger.info('voice: isRecognitionAvailable 失败 %s（%s）'
+                        % (type(e).__name__, e))
 
         outer = self
 
@@ -212,7 +228,13 @@ class VoiceRecognizer:
                 pass
 
         try:
-            self._recognizer = SpeechRecognizer.createSpeechRecognizer(activity)
+            try:
+                self._recognizer = SpeechRecognizer.createSpeechRecognizer(
+                    activity)
+            except Exception:
+                # 个别机型必须用 ApplicationContext 创建
+                self._recognizer = SpeechRecognizer.createSpeechRecognizer(
+                    activity.getApplicationContext())
             self._android_listener = _Listener()
             self._recognizer.setRecognitionListener(self._android_listener)
 
@@ -224,13 +246,18 @@ class VoiceRecognizer:
             intent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, False)
             intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, True)
             intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            try:
+                intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE,
+                                activity.getPackageName())
+            except Exception:
+                pass
 
             self._listening = True
             self._recognizer.startListening(intent)
         except Exception as e:
             self._listening = False
             self._recognizer = None
-            self._fire_error('启动语音识别失败：%s' % e)
+            self._fire_error('启动语音识别失败：%s（%s）' % (type(e).__name__, e))
 
     # ---------------- 桌面实现 ----------------
     def _start_desktop(self):

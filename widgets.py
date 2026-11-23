@@ -271,8 +271,11 @@ def TI(hint='', text='', size=15, input_type='number', multiline=False,
 
 
 # ---------------- 底部导航 ----------------
-class NavTab(BoxLayout, ButtonBehavior):
-    """底部标签：图标 + 加粗大字"""
+class NavTab(ButtonBehavior, BoxLayout):
+    """底部标签：图标 + 加粗大字
+
+    注意：ButtonBehavior 必须放在 BoxLayout 之前，否则 MRO 里
+    Widget.on_touch_down 会盖掉 ButtonBehavior 的触摸处理，导致点击无反应。"""
 
     def __init__(self, icon, label, name, on_switch, **kwargs):
         super().__init__(**kwargs)
