@@ -20,6 +20,7 @@ from kivy.clock import Clock
 
 import theme
 import icons
+from appinfo import APP_NAME, APP_VERSION
 import share
 from theme import C
 from widgets import (L, B, Card, TopBar, TI, BarChart, LineChart,
@@ -1235,12 +1236,14 @@ class ProfileScreen(Screen):
                                 color=theme.DANGER))
         body.add_widget(c2)
 
-        # 关于
+        # 关于（APP_VERSION 需与 GitHub Release 标签保持一致）
         c3 = Card()
         c3.add_widget(L('关于', 15, theme.TEXT, bold=True))
-        c3.add_widget(L('血压记录助手 v1.0', 12, theme.TEXT_LIGHT))
-        c3.add_widget(L('所有健康数据仅保存在本机，不上传云端；\n'
-                        '定期导出备份，就医时可提供给医生参考。',
+        c3.add_widget(L('血压记录助手 v%s' % APP_VERSION, 13, theme.TEXT,
+                        bold=True))
+        c3.add_widget(L('语音 / 键盘双模录入血压；趋势图表与统计分析；\n'
+                        '健康知识库。所有数据仅保存在本机，不上传云端，\n'
+                        '可导出 CSV 或本地备份，就医时提供给医生参考。',
                         12, theme.TEXT_LIGHT))
         body.add_widget(c3)
         self.add_widget(root)
