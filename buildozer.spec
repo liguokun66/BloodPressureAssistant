@@ -24,7 +24,7 @@ version = 1.0
 # Python 依赖（Android 端）
 # 说明：Android 端语音识别走系统 SpeechRecognizer(pyjnius)，
 # speech_recognition 仅用于桌面端测试，不参与 Android 打包。
-requirements = python3,kivy==2.2.1,pyjnius==1.4.2
+requirements = python3,kivy==2.2.1,pyjnius
 
 # 屏幕方向
 orientation = portrait

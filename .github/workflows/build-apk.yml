@@ -35,12 +35,31 @@ jobs:
           python3 -m pip install buildozer "cython<3.0"
 
       - name: Build debug APK
-        run: buildozer android debug
+        run: |
+          set -o pipefail
+          buildozer android debug 2>&1 | tee build.log
         timeout-minutes: 80
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: apk
           path: bin/*.apk
           if-no-files-found: error
+
+      # 把构建日志推到 ci-logs 分支，方便无需登录即可排查
+      - name: Save build log
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.email "ci@local"
+          git config --global user.name "ci"
+          git fetch origin main
+          git checkout -B ci-logs origin/main
+          mkdir -p ci-logs
+          cp "$GITHUB_WORKSPACE/build.log" "ci-logs/run-${GITHUB_RUN_NUMBER}.log"
+          git add ci-logs
+          git commit -m "ci: build log for run ${GITHUB_RUN_NUMBER}" || true
+          git push "https://x-access-token:${GH_TOKEN}@github.com/liguokun66/BloodPressureAssistant.git" ci-logs || true
