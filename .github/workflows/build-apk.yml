@@ -34,6 +34,20 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install buildozer "cython<3.0" pexpect
 
+      # Android Gradle Plugin 需要 JDK 17，而 runner 默认 JAVA_HOME 是 JDK 11
+      - name: Switch to JDK 17
+        run: |
+          for d in /usr/lib/jvm/temurin-17-jdk-amd64 \
+                   /usr/lib/jvm/java-17-openjdk-amd64; do
+            if [ -d "$d" ]; then
+              echo "JAVA_HOME=$d" >> "$GITHUB_ENV"
+              echo "$d/bin" >> "$GITHUB_PATH"
+              echo "using $d"
+              break
+            fi
+          done
+          java -version
+
       - name: Build debug APK
         run: |
           set -o pipefail
