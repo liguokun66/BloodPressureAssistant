@@ -1,11 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-  额外注入到 AndroidManifest.xml 的内容（放在 <application> 之前）。
-  作用：Android 11+ 的包可见性过滤会导致
-        SpeechRecognizer.isRecognitionAvailable() 误判为不可用，
-        这里声明“可查询语音识别服务”，保证语音录入可用。
--->
-<queries>
+<queries xmlns:android="http://schemas.android.com/apk/res/android">
     <intent>
         <action android:name="android.speech.RecognitionService" />
     </intent>

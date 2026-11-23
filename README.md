@@ -117,12 +117,16 @@ Android 11 及以上启用了「包可见性」过滤，若不声明 `<queries>`
 `android.extra_manifest_xml`）：
 
 ```xml
-<queries>
+<queries xmlns:android="http://schemas.android.com/apk/res/android">
     <intent>
         <action android:name="android.speech.RecognitionService" />
     </intent>
 </queries>
 ```
+
+注意：该文件会被**整段插入** `AndroidManifest.xml`，因此不能包含
+`<?xml ...?>` 声明，且必须声明 `xmlns:android` 命名空间，否则 Manifest 合并会报
+“Error parsing AndroidManifest.xml” 而构建失败。
 
 若仍然失败，应用会给出具体原因（无识别服务 / 无麦克风权限 / 创建失败），
 可据此在系统设置中处理。
