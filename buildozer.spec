@@ -44,6 +44,11 @@ android.ndk = 25b
 # 非交互环境下自动接受 SDK 许可证（CI 必需）
 android.accept_sdk_license = True
 
+# 固定 python-for-android 版本。
+# master 分支已改用 Python 3.14 构建宿主解释器，与 Kivy 2.2.1 自带的
+# Cython 0.29 构建链不兼容（会报 ModuleNotFoundError: No module named 'cgi'）。
+p4a.branch = v2024.01.21
+
 # 目标架构（安卓手机通常为 arm64-v8a）
 android.archs = arm64-v8a,armeabi-v7a
 

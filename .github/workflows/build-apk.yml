@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 180
 
     steps:
       - name: Checkout
@@ -32,13 +32,13 @@ jobs:
       - name: Install buildozer
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install buildozer "cython<3.0"
+          python3 -m pip install buildozer "cython<3.0" pexpect
 
       - name: Build debug APK
         run: |
           set -o pipefail
           buildozer android debug 2>&1 | tee build.log
-        timeout-minutes: 80
+        timeout-minutes: 160
 
       - name: Upload APK
         if: success()
