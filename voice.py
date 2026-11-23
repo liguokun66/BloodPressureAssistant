@@ -111,13 +111,37 @@ class VoiceRecognizer:
 
     # ---------------- Android 实现 ----------------
     def _start_android(self):
-        """先切回主线程再启动：SpeechRecognizer 必须在主线程创建，
-        否则部分机型会抛 “SpeechRecognizer should be used only with the
-        main thread”。"""
+        """切到 Android 主（UI）线程再创建/启动 SpeechRecognizer。
+
+        Kivy 的 Python 主循环跑在 SDL 自己的线程上，而 SpeechRecognizer
+        要求在主 Looper 上创建，否则会抛
+        “SpeechRecognizer should be used only with the main thread”。
+        """
         try:
-            from kivy.clock import Clock
-            Clock.schedule_once(lambda dt: self._start_android_ui(), 0)
+            from jnius import autoclass, PythonJavaClass, java_method
+            activity = autoclass('org.kivy.android.PythonActivity').mActivity
+
+            class _Task(PythonJavaClass):
+                __javainterfaces__ = ['java/lang/Runnable']
+
+                def __init__(self, fn):
+                    super().__init__()
+                    self._fn = fn
+
+                @java_method('()V')
+                def run(self):
+                    try:
+                        self._fn()
+                    except Exception:
+                        Logger.info('voice: ui task failed\n%s'
+                                    % traceback.format_exc())
+
+            if activity is not None:
+                activity.runOnUiThread(_Task(self._start_android_ui))
+            else:
+                self._start_android_ui()
         except Exception:
+            # 拿不到 jnius / activity 时走原路径（不影响桌面）
             self._start_android_ui()
 
     def _start_android_ui(self):
@@ -157,6 +181,15 @@ class VoiceRecognizer:
 
         outer = self
 
+        def _post(fn, *args):
+            """RecognitionListener 回调在 Android UI 线程，派发回 Kivy 主循环，
+            避免跨线程改控件。"""
+            try:
+                from kivy.clock import Clock
+                Clock.schedule_once(lambda dt: fn(*args), 0)
+            except Exception:
+                pass
+
         class _Listener(PythonJavaClass):
             __javainterfaces__ = ['android/speech/RecognitionListener']
 
@@ -166,7 +199,7 @@ class VoiceRecognizer:
 
             @java_method('(Landroid/os/Bundle;)V')
             def onReadyForSpeech(self, params):
-                outer._fire_ready()
+                _post(outer._fire_ready)
 
             @java_method('()V')
             def onBeginningOfSpeech(self):
@@ -198,7 +231,8 @@ class VoiceRecognizer:
                     9: '没有听到语音，请重试',
                 }
                 outer._listening = False
-                outer._fire_error(msg_map.get(error, '识别失败（错误码 %s）' % error))
+                _post(outer._fire_error,
+                      msg_map.get(error, '识别失败（错误码 %s）' % error))
 
             @java_method('(Landroid/os/Bundle;)V')
             def onResults(self, results):
@@ -206,11 +240,14 @@ class VoiceRecognizer:
                     arr = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     if arr is not None and arr.size() > 0:
                         text = arr.get(0)
-                        outer._fire_result(text if text else '')
+                        outer._listening = False
+                        _post(outer._fire_result, text if text else '')
                     else:
-                        outer._fire_error('没有识别到内容，请重试。')
+                        outer._listening = False
+                        _post(outer._fire_error, '没有识别到内容，请重试。')
                 except Exception as e:
-                    outer._fire_error('识别结果解析失败：%s' % e)
+                    outer._listening = False
+                    _post(outer._fire_error, '识别结果解析失败：%s' % e)
                 outer._listening = False
 
             @java_method('(Landroid/os/Bundle;)V')
@@ -219,7 +256,7 @@ class VoiceRecognizer:
                     arr = partial.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     if arr is not None and arr.size() > 0:
                         self.partial_text = arr.get(0) or ''
-                        outer._fire_partial(self.partial_text)
+                        _post(outer._fire_partial, self.partial_text)
                 except Exception:
                     pass
 

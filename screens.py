@@ -571,10 +571,18 @@ class AddScreen(Screen):
 
         # ===== 临时诊断：定位安卓端「点击输入框键盘不弹出」=====
         def _dbg(ev):
-            self.dbg.text = ('DBG %s | sys=%d dia=%d pul=%d'
+            try:
+                import kbdbg
+                kb = kbdbg.KB
+                kbs = 'kb=%d/%d' % (kb['req'], kb['shown'])
+                if kb.get('err'):
+                    kbs += '!' + str(kb['err'])[:18]
+            except Exception:
+                kbs = ''
+            self.dbg.text = ('DBG %s | sys=%d dia=%d pul=%d | %s'
                              % (ev, int(bool(self.sys.focus)),
                                 int(bool(self.dia.focus)),
-                                int(bool(self.pul.focus))))
+                                int(bool(self.pul.focus)), kbs))
         _dbg('就绪')
 
         def _wrap(ti, name):

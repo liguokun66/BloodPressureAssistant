@@ -16,6 +16,7 @@ from kivy.utils import platform
 
 import theme
 import icons
+import kbdbg
 from theme import C
 from widgets import BottomNav
 from screens import (HomeScreen, AnalysisScreen, KnowledgeScreen,
@@ -30,6 +31,65 @@ FONT_FILES = [
     'DroidSansFallback.ttf',
     'SourceHanSansSC-Regular.otf',
 ]
+
+
+def patch_android_keyboard():
+    """安卓软键盘补丁（对应真机问题「点输入框键盘不弹出」）。
+
+    现象：输入框 focus 正常，但系统输入法不出来。
+    怀疑：Kivy 在 request_keyboard 后每 0.2s 检查一次
+    `SDL_IsScreenKeyboardShown`，部分机型该接口始终返回 False，于是 Kivy
+    认定键盘没弹出来并把 keyboard release 掉（表现为永远看不到输入法）。
+
+    做法：刚请求键盘后的 4s 宽限期内不释放，并主动重新唤起一次；
+    同时把状态写进 kbdbg.KB，供界面上的 DBG 行读取。
+    """
+    try:
+        import time
+        from kivy.base import EventLoop
+        cls = type(EventLoop.window)
+        if getattr(cls, '_bp_patched', False):
+            return
+
+        _orig_req = cls.request_keyboard
+
+        def request_keyboard(self, callback, target, input_type='text',
+                             keyboard_suggestions=True):
+            kbdbg.KB['req'] += 1
+            kbdbg.KB['shown'] = -1
+            kbdbg.KB['t'] = time.time()
+            kbdbg.KB['retry'] = False
+            return _orig_req(self, callback, target, input_type,
+                             keyboard_suggestions)
+
+        def _check_keyboard_shown(self, dt):
+            if self._sdl_keyboard is None:
+                return False
+            try:
+                shown = bool(self._win.is_keyboard_shown())
+            except Exception:
+                return False
+            kbdbg.KB['shown'] = 1 if shown else 0
+            if shown:
+                return False
+            if time.time() - kbdbg.KB.get('t', 0) < 4.0:
+                if not kbdbg.KB.get('retry'):
+                    kbdbg.KB['retry'] = True
+                    try:
+                        self._win.show_keyboard(self._system_keyboard,
+                                                self.softinput_mode,
+                                                'text', True)
+                    except Exception as e:
+                        kbdbg.KB['err'] = '%s: %s' % (type(e).__name__, e)
+                return False
+            self._sdl_keyboard.release()
+            return False
+
+        cls.request_keyboard = request_keyboard
+        cls._check_keyboard_shown = _check_keyboard_shown
+        cls._bp_patched = True
+    except Exception as e:
+        kbdbg.KB['err'] = 'patch: %s: %s' % (type(e).__name__, e)
 
 
 def register_chinese_font():
@@ -108,6 +168,8 @@ class BPMain(App):
         # 桌面端默认使用手机竖屏尺寸（Android 为全屏，不受影响）
         if platform != 'android':
             Window.size = (430, 860)
+        if platform == 'android':
+            patch_android_keyboard()
         register_chinese_font()
         icons.register()
         root = Root(self)

@@ -50,6 +50,28 @@ jobs:
           done
           java -version
 
+      # 让 APK 文件名 / versionName 带上真实版本号（从 tag 推导，
+      # 例如 bpassistant-1.0.17-arm64-v8a-debug.apk），避免每个 Release 同名
+      - name: Sync version from tag
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          if [ -z "$VER" ] || [ "$VER" = "${GITHUB_REF_NAME}" ]; then
+            VER="1.0.0"
+          fi
+          export VER
+          python3 - <<'PY'
+          import os, pathlib, re
+          ver = os.environ['VER']
+          p = pathlib.Path('buildozer.spec')
+          s = p.read_text(encoding='utf-8')
+          s2, n = re.subn(r'(?m)^version\s*=.*$', 'version = %s' % ver, s)
+          if n != 1:
+              raise SystemExit('buildozer.spec 里找到 %d 个 version 行，放弃' % n)
+          p.write_text(s2, encoding='utf-8')
+          print('buildozer.spec version ->', ver)
+          PY
+          grep -n '^version' buildozer.spec
+
       - name: Build debug APK
         run: |
           set -o pipefail
