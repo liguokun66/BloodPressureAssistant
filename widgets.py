@@ -7,10 +7,14 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
+from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.textinput import TextInput
+from kivy.uix.widget import Widget
 from kivy.graphics import Color, RoundedRectangle, Line, Rectangle, Ellipse
 from kivy.metrics import dp, sp
 from kivy.clock import Clock
+
+import math
 
 import theme
 import icons
@@ -20,21 +24,22 @@ from theme import C
 # ---------------- 文本 ----------------
 def L(text, size=14, color=None, bold=False, align='left',
       valign='middle', markup=False, shorten=False,
-      size_hint=None, width=None, height=None):
+      size_hint=None, width=None, height=None, expand=False):
     lbl = Label(
         text=text, font_size=sp(size),
         color=C(color if color is not None else theme.TEXT),
         bold=bold, halign=align, valign=valign, markup=markup,
         font_name=theme.font(), shorten=shorten,
     )
-    lbl.size_hint = size_hint if size_hint is not None else (None, None)
+    lbl.size_hint = size_hint if size_hint is not None else (
+        (1, None) if expand else (None, None))
     if width is not None:
         lbl.width = dp(width)
     if height is not None:
         lbl.height = dp(height)
 
     def _sz(inst, val):
-        if width is None:
+        if width is None and not expand:
             inst.width = val[0]
         inst.height = val[1]
         if width is not None:
@@ -184,8 +189,10 @@ class TopBar(BoxLayout):
             self._ln = Line(points=[0, 0, 0, 0], width=1)
         self.bind(pos=self._upd, size=self._upd)
         if show_back:
-            self.add_widget(B('‹ 返回', bg=(0, 0, 0, 0), color=theme.TEXT_LIGHT,
-                              size=14, height=40, radius=8,
+            self.add_widget(B(icons.im('arrow_back') + '  返回',
+                              bg=(0, 0, 0, 0), color=theme.TEXT_LIGHT,
+                              size=14, height=44, radius=10, markup=True,
+                              size_hint_x=None, width=dp(92),
                               on_press=lambda i: on_back and on_back()))
         box = BoxLayout(orientation='vertical', size_hint_x=1,
                         padding=[dp(2), 0])
@@ -196,7 +203,8 @@ class TopBar(BoxLayout):
         self.add_widget(box)
         if right_text:
             self.add_widget(B(right_text, bg=(0, 0, 0, 0), color=theme.PRIMARY,
-                              size=14, height=40, radius=8,
+                              size=14, height=44, radius=10, markup=True,
+                              size_hint_x=None, width=dp(92),
                               on_press=lambda i: on_right and on_right()))
 
     def _upd(self, *a):
@@ -212,40 +220,98 @@ class FieldInput(TextInput):
         kwargs.setdefault('background_active', '')
         kwargs.setdefault('background_color', (0, 0, 0, 0))
         kwargs.setdefault('font_name', theme.font())
+        self._hl = None       # 手动指定的描边色（异常高亮）
+        self._focused = False
         super().__init__(**kwargs)
         with self.canvas.before:
-            Color(rgba=C(theme.ACCENT))
+            Color(rgba=C(theme.FIELD))
             self._bg = RoundedRectangle(pos=self.pos, size=self.size,
-                                        radius=[dp(10)])
-            self._bdc = Color(rgba=C(theme.DIVIDER))
+                                        radius=[dp(11)])
+            self._bdc = Color(rgba=C(theme.FIELD_BD))
             self._bd = Line(rectangle=(self.x, self.y, self.width, self.height),
-                            width=1.0)
+                            width=dp(1.2))
         self.bind(pos=self._upd, size=self._upd)
+        self.bind(focus=self._on_focus)
 
     def _upd(self, *a):
         self._bg.pos = self.pos
         self._bg.size = self.size
         self._bd.rectangle = (self.x, self.y, self.width, self.height)
 
+    def _on_focus(self, inst, val):
+        self._focused = val
+        self._apply_border()
+
+    def _apply_border(self):
+        if self._hl is not None:
+            col = self._hl
+        elif self._focused:
+            col = theme.PRIMARY
+        else:
+            col = theme.FIELD_BD
+        self._bdc.rgba = C(col)
+
     def set_border(self, color):
-        """异常高亮：改变输入框描边颜色"""
-        self._bdc.rgba = C(color)
+        """异常高亮：改变输入框描边颜色；传 None 恢复默认"""
+        self._hl = color
+        self._apply_border()
 
 
 def TI(hint='', text='', size=15, input_type='number', multiline=False,
-       readonly=False, height=48, fg=None):
+       readonly=False, height=50, fg=None):
     return FieldInput(
         hint_text=hint, text=text, font_size=sp(size), input_type=input_type,
         multiline=multiline, readonly=readonly,
         size_hint_y=None, height=dp(height),
         foreground_color=C(fg if fg is not None else theme.TEXT),
-        hint_text_color=C(theme.TEXT_LIGHT),
+        hint_text_color=C(theme.HINT),
         cursor_color=C(theme.PRIMARY),
-        padding=[dp(12), dp(13)],
+        padding=[dp(13), dp(14)],
     )
 
 
 # ---------------- 底部导航 ----------------
+class NavTab(BoxLayout, ButtonBehavior):
+    """底部标签：图标 + 加粗大字"""
+
+    def __init__(self, icon, label, name, on_switch, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.spacing = dp(2)
+        self.name = name
+        self.size_hint_x = 1
+        self.padding = [dp(2), dp(5)]
+        self._on_switch = on_switch
+        with self.canvas.before:
+            self._c = Color(rgba=(0, 0, 0, 0))
+            self._bg = RoundedRectangle(pos=self.pos, size=self.size,
+                                        radius=[dp(12)])
+        self.ic = Label(
+            text='[font=%s]%s[/font]' % (icons.FONT_NAME, icons.ic(icon)),
+            markup=True, font_name=theme.font(), font_size=sp(19),
+            color=C(theme.TEXT_LIGHT))
+        self.tx = Label(text=label, font_name=theme.font(),
+                        font_size=sp(12.5), bold=True,
+                        color=C(theme.TEXT_LIGHT))
+        self.add_widget(self.ic)
+        self.add_widget(self.tx)
+        self.bind(pos=self._u, size=self._u)
+        self.bind(on_press=self._press)
+
+    def _press(self, inst):
+        self._on_switch(self.name)
+
+    def _u(self, *a):
+        self._bg.pos = self.pos
+        self._bg.size = self.size
+
+    def set_active(self, val):
+        col = C(theme.PRIMARY if val else theme.TEXT_LIGHT)
+        self.ic.color = col
+        self.tx.color = col
+        self._c.rgba = (col[0], col[1], col[2], 0.16 if val else 0.0)
+
+
 class BottomNav(BoxLayout):
     TABS = [
         ('记录', 'home', 'record'),
@@ -258,9 +324,9 @@ class BottomNav(BoxLayout):
         super().__init__(**kwargs)
         self.app = app
         self.size_hint_y = None
-        self.height = dp(64)
-        self.padding = [dp(6), dp(7)]
-        self.spacing = dp(2)
+        self.height = dp(74)
+        self.padding = [dp(8), dp(7)]
+        self.spacing = dp(6)
         with self.canvas.before:
             Color(rgba=C(theme.NAV_BG))
             self._bg = Rectangle(pos=self.pos, size=self.size)
@@ -269,18 +335,9 @@ class BottomNav(BoxLayout):
         self.bind(pos=self._upd, size=self._upd)
         self.buttons = {}
         for label, name, icon in self.TABS:
-            btn = Button(
-                text='[font=%s]%s[/font]\n%s' % (icons.FONT_NAME, icons.ic(icon),
-                                                label),
-                font_size=sp(11), font_name=theme.font(),
-                markup=True,
-                background_normal='', background_down='',
-                background_color=(0, 0, 0, 0),
-                color=C(theme.TEXT_LIGHT),
-            )
-            btn.bind(on_press=lambda inst, n=name: self.switch(n))
-            self.add_widget(btn)
-            self.buttons[name] = btn
+            tab = NavTab(icon, label, name, self.switch)
+            self.add_widget(tab)
+            self.buttons[name] = tab
         self.highlight('home')
 
     def _upd(self, *a):
@@ -297,9 +354,8 @@ class BottomNav(BoxLayout):
 
     def highlight(self, name):
         tab = 'home' if name == 'add' else name
-        for n, btn in self.buttons.items():
-            btn.color = C(theme.PRIMARY if n == tab else theme.TEXT_LIGHT)
-            btn.bold = (n == tab)
+        for n, t in self.buttons.items():
+            t.set_active(n == tab)
 
 
 # ---------------- 血压柱状图（柱体：低压 → 高压）----------------
@@ -334,11 +390,12 @@ class BarChart(FloatLayout):
                 pass
         self._lbls = []
         self.canvas.after.clear()
-        pl, pr, pt, pb = dp(30), dp(10), dp(14), dp(24)
+        pl, pr, pt, pb = dp(30), dp(10), dp(24), dp(24)
         x0 = self.x + pl
         y0 = self.y + pb
         w = max(self.width - pl - pr, 1)
         h = max(self.height - pt - pb, 1)
+        tags = []          # (cx, y_top, 文本, 颜色)
 
         def Y(v):
             return y0 + h * (v - self.ymin) / float(self.ymax - self.ymin)
@@ -352,15 +409,22 @@ class BarChart(FloatLayout):
             n = len(recs)
             if n:
                 step = w / float(n)
-                bw = min(dp(11), step * 0.52)
+                bw = min(dp(12), step * 0.52)
                 for i, r in enumerate(recs):
                     cx = x0 + step * (i + 0.5)
                     s, d = int(r['systolic']), int(r['diastolic'])
                     col = theme.level_color(s, d)
+                    txt = theme.level_text(s, d)
                     y_hi, y_lo = Y(max(s, d)), Y(min(s, d))
+                    bh = max(y_hi - y_lo, dp(2))
+                    rad = min(bw, bh) / 2.0
                     Color(rgba=C(col))
-                    Rectangle(pos=(cx - bw / 2.0, y_lo),
-                              size=(bw, max(y_hi - y_lo, dp(2))))
+                    # 圆头柱体（更圆润）
+                    RoundedRectangle(pos=(cx - bw / 2.0, y_lo),
+                                     size=(bw, bh),
+                                     radius=[rad, rad, rad, rad])
+                    if txt in ('偏低', '偏高', '高血压'):
+                        tags.append((cx, y_hi, txt, col))
         # 纵轴刻度
         for gv in (60, 100, 140, 180):
             lb = L(str(gv), 10, theme.TEXT_LIGHT)
@@ -378,6 +442,12 @@ class BarChart(FloatLayout):
                 lb.pos = (x0 + step * (i + 0.5) - dp(15), self.y + dp(4))
                 self.add_widget(lb)
                 self._lbls.append(lb)
+        # 柱顶状态标签（偏低/偏高/高血压，正常不显示）
+        for cx, y_top, txt, col in tags:
+            lb = L(txt, 9, col, bold=True, align='center', width=dp(38))
+            lb.pos = (cx - dp(19), y_top + dp(1))
+            self.add_widget(lb)
+            self._lbls.append(lb)
 
 
 # ---------------- 趋势折线图 ----------------
@@ -491,6 +561,50 @@ class LineChart(FloatLayout):
             self.add_widget(lb)
             self._lbls.append(lb)
             lx += dp(78)
+
+
+# ---------------- 语音声波动画 ----------------
+class VoiceWave(Widget):
+    """语音录入进行中的波浪动画"""
+
+    def __init__(self, bars=7, color=None, **kwargs):
+        kwargs.setdefault('size_hint', (None, None))
+        kwargs.setdefault('size', (dp(150), dp(30)))
+        super().__init__(**kwargs)
+        self.bars = bars
+        self.color = color or theme.PRIMARY
+        self._t = 0.0
+        self._timer = None
+        self._phases = [i * 0.85 for i in range(bars)]
+
+    def start(self):
+        if self._timer is not None:
+            return
+        self._timer = Clock.schedule_interval(self._tick, 0.09)
+
+    def stop(self):
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        self.canvas.after.clear()
+
+    def _tick(self, dt):
+        self._t += 0.17
+        c = self.canvas.after
+        c.clear()
+        n = self.bars
+        w, h = self.width, self.height
+        bw = w / (n * 1.7)
+        gap = (w - bw * n) / float(n - 1) if n > 1 else 0.0
+        with c:
+            Color(rgba=C(self.color))
+            for i in range(n):
+                env = math.sin(self._t + self._phases[i])
+                bh = max(h * 0.2, h * (0.3 + 0.6 * abs(env)))
+                x = self.x + i * (bw + gap)
+                y = self.center_y - bh / 2.0
+                RoundedRectangle(pos=(x, y), size=(bw, bh),
+                                 radius=[bw / 2] * 4)
 
 
 # ---------------- 弹窗 ----------------

@@ -20,9 +20,10 @@ from kivy.clock import Clock
 
 import theme
 import icons
+import share
 from theme import C
 from widgets import (L, B, Card, TopBar, TI, BarChart, LineChart,
-                     confirm_dialog, message_dialog)
+                     confirm_dialog, message_dialog, VoiceWave)
 from voice_parser import parse_voice_text, validate
 from voice import VoiceRecognizer
 
@@ -38,13 +39,23 @@ def full_date(t):
 
 
 def ensure_mic(cb):
-    """申请麦克风权限后回调"""
+    """确保拿到麦克风权限后再回调（Android 需要运行时授权）。
+    cb(granted: bool)"""
     try:
-        from android.permissions import request_permissions, Permission
-        request_permissions([Permission.RECORD_AUDIO])
+        from android.permissions import (request_permissions,
+                                         check_permission, Permission)
+        if check_permission(Permission.RECORD_AUDIO):
+            Clock.schedule_once(lambda dt: cb(True), 0)
+            return
+
+        def on_done(perms, grants):
+            ok = bool(grants) and bool(grants[0])
+            Clock.schedule_once(lambda dt: cb(ok), 0)
+
+        request_permissions([Permission.RECORD_AUDIO], on_done)
     except Exception:
-        pass
-    Clock.schedule_once(lambda dt: cb(), 0.5)
+        # 非 Android 平台或模块缺失：直接放行
+        Clock.schedule_once(lambda dt: cb(True), 0)
 
 
 # ================= 科普知识库 =================
@@ -153,6 +164,8 @@ class DashCard(Card):
 
     def __init__(self, rec):
         super().__init__()
+        self.padding = [dp(12), dp(10)]
+        self.spacing = dp(6)
         if not rec:
             self.add_widget(L('暂无数据', 13, theme.TEXT_LIGHT))
             return
@@ -161,17 +174,28 @@ class DashCard(Card):
         cells = [
             ('收缩压', rec['systolic'], 'mmHg', col),
             ('舒张压', rec['diastolic'], 'mmHg', col),
-            ('脉搏', rec['pulse'], 'BPM', theme.PRIMARY),
+            ('脉搏', rec['pulse'], '次/分', theme.PRIMARY),
         ]
-        row = BoxLayout(spacing=dp(6))
+        row = BoxLayout(spacing=dp(8), size_hint_y=None, height=dp(74))
         for nm, val, unit, c in cells:
-            cell = BoxLayout(orientation='vertical', spacing=dp(1))
-            cell.add_widget(L(nm, 11, theme.TEXT_LIGHT))
-            cell.add_widget(L(str(val), 34, c, bold=True))
-            cell.add_widget(L(unit, 10, theme.TEXT_LIGHT))
+            cell = BoxLayout(orientation='vertical', size_hint_x=1, spacing=dp(1))
+            cell.add_widget(L(nm, 11, theme.TEXT_LIGHT, align='center',
+                              expand=True))
+            cell.add_widget(L(str(val), 32, c, bold=True, align='center',
+                              expand=True))
+            cell.add_widget(L(unit, 10, theme.TEXT_LIGHT, align='center',
+                              expand=True))
             row.add_widget(cell)
         self.add_widget(row)
-        foot = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(8))
+        # 与「最近测量」拉开距离（中间加分隔线）
+        div = Widget(size_hint_y=None, height=dp(1))
+        with div.canvas.before:
+            Color(rgba=C(theme.DIVIDER))
+            rect = Rectangle(pos=div.pos, size=div.size)
+        div.bind(pos=lambda inst, v: setattr(rect, 'pos', inst.pos),
+                 size=lambda inst, v: setattr(rect, 'size', inst.size))
+        self.add_widget(div)
+        foot = BoxLayout(size_hint_y=None, height=dp(26), spacing=dp(8))
         foot.add_widget(L('● ' + txt, 13, col, bold=True))
         foot.add_widget(L('最近测量  ' + short_time(rec['measure_time']),
                            11, theme.TEXT_LIGHT))
@@ -181,15 +205,15 @@ class DashCard(Card):
 
 
 class RecordItem(BoxLayout):
-    """历史记录卡片：左状态色条 + 数值 + 编辑/删除"""
+    """历史记录卡片：血压值居中靠右 + 左状态色条 + 编辑/删除"""
 
     def __init__(self, rec, on_edit, on_delete, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
         self.size_hint_y = None
         self.height = dp(98)
-        self.padding = [0, dp(9)]
-        self.spacing = dp(8)
+        self.padding = [0, dp(8)]
+        self.spacing = dp(6)
         key, txt = theme.bp_level(rec['systolic'], rec['diastolic'])
         col = getattr(theme, key)
         with self.canvas.before:
@@ -201,30 +225,34 @@ class RecordItem(BoxLayout):
                                   size=(dp(5), self.height))
         self.bind(pos=self._upd, size=self._upd)
 
-        mid = BoxLayout(orientation='vertical', spacing=dp(3), size_hint_x=1)
-        r1 = BoxLayout(spacing=dp(10))
-        r1.add_widget(L('%d/%d' % (rec['systolic'], rec['diastolic']),
-                        22, col, bold=True))
-        r1.add_widget(L(txt, 12, col))
-        mid.add_widget(r1)
-        mid.add_widget(L(short_time(rec['measure_time']), 12, theme.TEXT_LIGHT))
+        # 左侧：时间 + 脉搏/备注
+        mid = BoxLayout(orientation='vertical', spacing=dp(4), size_hint_x=1,
+                        padding=[dp(10), dp(6)])
+        mid.add_widget(L(short_time(rec['measure_time']), 12,
+                         theme.TEXT_LIGHT))
         line = '脉搏 %d 次/分' % rec['pulse']
         if rec.get('note'):
             line += '   ·   ' + rec['note']
         mid.add_widget(L(line, 11, theme.TEXT_LIGHT, shorten=True))
         self.add_widget(mid)
 
-        ops = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(46),
-                        spacing=dp(8), padding=[0, dp(8)])
+        # 右侧：血压值（居中靠右）+ 状态 + 编辑/删除
+        right = BoxLayout(orientation='vertical', size_hint_x=None,
+                          width=dp(112), spacing=dp(1), padding=[0, dp(5)])
+        right.add_widget(L('%d/%d' % (rec['systolic'], rec['diastolic']),
+                           22, col, bold=True, align='center', expand=True))
+        right.add_widget(L(txt, 11, col, align='center'))
+        ops = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(6))
         ops.add_widget(B(icons.ic('edit'), bg=theme.CARD_LIGHT,
-                         color=theme.TEXT, size=18, height=34, radius=9,
-                         font_name=icons.FONT_NAME,
-                         on_press=lambda inst: on_edit(rec)))
+                          color=theme.TEXT, size=15, height=32, radius=8,
+                          font_name=icons.FONT_NAME, size_hint_x=1,
+                          on_press=lambda inst: on_edit(rec)))
         ops.add_widget(B(icons.ic('delete'), bg=theme.CARD_LIGHT,
-                         color=theme.DANGER, size=18, height=34, radius=9,
-                         font_name=icons.FONT_NAME,
-                         on_press=lambda inst: on_delete(rec)))
-        self.add_widget(ops)
+                          color=theme.DANGER, size=15, height=32, radius=8,
+                          font_name=icons.FONT_NAME, size_hint_x=1,
+                          on_press=lambda inst: on_delete(rec)))
+        right.add_widget(ops)
+        self.add_widget(right)
 
     def _upd(self, *a):
         self._bg.pos = self.pos
@@ -333,21 +361,36 @@ class HomeScreen(Screen):
         self.scroll.add_widget(self.content)
         root.add_widget(self.scroll)
         bottom = BoxLayout(orientation='vertical', size_hint_y=None,
-                           height=dp(96), padding=[dp(14), dp(10)])
+                           height=dp(96), padding=[dp(14), dp(8)])
         self.hint = L('轻点填写 · 长按直接说话', 11, theme.TEXT_LIGHT,
                       size_hint=(1, None), height=dp(16))
         bottom.add_widget(self.hint)
+        # 声波动画（仅在语音识别时显示）
+        self.wave_wrap = FloatLayout(size_hint_y=None, height=dp(0))
+        self.wave = VoiceWave(size=(dp(170), dp(30)))
+        self.wave.opacity = 0
+        self.wave_wrap.add_widget(self.wave)
+        self.wave_wrap.bind(pos=self._center_wave, size=self._center_wave)
+        bottom.add_widget(self.wave_wrap)
         self.vr = None
-        bottom.add_widget(B('＋  添加记录', bg=theme.PRIMARY, height=52,
-                            size=16, bold=True, radius=14,
-                            on_press=lambda i: self.app.goto('add'),
-                            on_long_press=lambda *a: self.start_voice()))
+        self.add_btn = B('＋  添加记录', bg=theme.PRIMARY, height=52,
+                         size=16, bold=True, radius=14,
+                         on_press=lambda i: self.app.goto('add'),
+                         on_long_press=lambda *a: self.start_voice())
+        bottom.add_widget(self.add_btn)
         root.add_widget(bottom)
         self.add_widget(root)
         self.bind(on_pre_enter=self._enter)
 
+    def _center_wave(self, *a):
+        self.wave.center = self.wave_wrap.center
+
     def _enter(self, *a):
-        Clock.schedule_once(lambda dt: self.refresh(), 0)
+        def ui(dt):
+            self.refresh()
+            # 回到记录页时从顶部开始，避免看板被隐藏在滚动下方
+            self.scroll.scroll_y = 1.0
+        Clock.schedule_once(ui, 0)
 
     def refresh(self):
         self.content.clear_widgets()
@@ -372,20 +415,45 @@ class HomeScreen(Screen):
     # ---------------- 操作 ----------------
     HINT_DEFAULT = '轻点填写 · 长按直接说话'
 
+    def voice_running(self, on):
+        """切换声波动画与按钮状态"""
+        self.wave_wrap.height = dp(34) if on else dp(0)
+        self.wave.opacity = 1 if on else 0
+        if on:
+            self.wave.center = self.wave_wrap.center
+            self.wave.start()
+        else:
+            self.wave.stop()
+
     def start_voice(self):
         """长按「添加记录」：在当前页面直接语音录入，不跳转"""
         if self.vr is not None:
+            return
+        ensure_mic(self._do_start_voice)
+
+    def _do_start_voice(self, granted=True):
+        if not granted:
+            self.hint.text = '未获得麦克风权限，请在系统设置中允许后重试。'
+            Clock.schedule_once(lambda dt: self._restore_hint(), 3)
             return
         if not VoiceRecognizer().is_available():
             message_dialog('无法语音识别',
                            '当前设备不支持语音识别，请使用键盘输入。')
             return
+        self.voice_running(True)
         self.hint.text = '正在聆听，请说出血压和脉搏…'
         self.vr = VoiceRecognizer(
             on_result=self._quick_result,
+            on_partial=self._quick_partial,
             on_error=self._quick_err,
-            on_ready=lambda: self._quick_status('可以开始说话了…'))
+            on_ready=lambda: self._quick_status('正在输入… 请继续说'))
         self.vr.start()
+
+    def _quick_partial(self, text):
+        def ui(dt):
+            if text:
+                self.hint.text = '正在输入：%s' % text
+        Clock.schedule_once(ui, 0)
 
     def _quick_status(self, txt):
         def ui(dt):
@@ -395,6 +463,7 @@ class HomeScreen(Screen):
     def _quick_result(self, text):
         def ui(dt):
             self.vr = None
+            self.voice_running(False)
             parsed = parse_voice_text(text)
             s, d, p = (parsed['systolic'], parsed['diastolic'],
                        parsed['pulse'])
@@ -414,6 +483,7 @@ class HomeScreen(Screen):
     def _quick_err(self, msg):
         def ui(dt):
             self.vr = None
+            self.voice_running(False)
             self.hint.text = msg
             Clock.schedule_once(lambda dt: self._restore_hint(), 2.5)
         Clock.schedule_once(ui, 0)
@@ -499,12 +569,18 @@ class AddScreen(Screen):
         self.mic = B(icons.im('mic') + '  语音输入', bg=theme.CARD_LIGHT,
                      color=theme.TEXT, height=48, radius=12, size=14, bold=True,
                      markup=True,
-                     on_press=lambda i: self.start_voice())
+                     on_press=lambda i: self.toggle_voice())
         vb.add_widget(self.mic)
         body.add_widget(vb)
         self.status = L('说：「高压一百二，低压八十，脉搏七十二」',
                         12, theme.TEXT_LIGHT)
         body.add_widget(self.status)
+        self.wave_wrap = FloatLayout(size_hint_y=None, height=dp(0))
+        self.wave = VoiceWave(size=(dp(170), dp(28)))
+        self.wave.opacity = 0
+        self.wave_wrap.add_widget(self.wave)
+        self.wave_wrap.bind(pos=self._center_wave, size=self._center_wave)
+        body.add_widget(self.wave_wrap)
 
         sv = BoxLayout(size_hint_y=None, height=dp(56), padding=[0, dp(4)])
         sv.add_widget(B('保存记录', bg=theme.PRIMARY, height=52, size=16,
@@ -556,7 +632,7 @@ class AddScreen(Screen):
 
     def _clear_hl(self):
         for ti in (self.sys, self.dia, self.pul):
-            ti.set_border(theme.DIVIDER)
+            ti.set_border(None)
 
     def highlight(self):
         """超出正常范围→黄色描边；高压≤低压→红色描边（仍允许保存）"""
@@ -573,21 +649,56 @@ class AddScreen(Screen):
             self.dia.set_border(theme.DANGER)
 
     # ---------------- 语音 ----------------
+    def _center_wave(self, *a):
+        self.wave.center = self.wave_wrap.center
+
+    def _set_listening(self, on):
+        self.wave_wrap.height = dp(32) if on else dp(0)
+        self.wave.opacity = 1 if on else 0
+        if on:
+            self.wave.center = self.wave_wrap.center
+            self.wave.start()
+            self.mic.text = icons.im('close') + '  停止聆听'
+        else:
+            self.wave.stop()
+            self.mic.text = icons.im('mic') + '  语音输入'
+
+    def toggle_voice(self):
+        if self.vr is not None:
+            self.vr.stop()
+            self.vr = None
+            self._set_listening(False)
+            self.status.text = '已停止聆听，可点击「语音输入」重新识别。'
+            return
+        self.start_voice()
+
     def start_voice(self):
+        if self.vr is not None:
+            return
         ensure_mic(self._do_start)
 
-    def _do_start(self):
+    def _do_start(self, granted=True):
+        if not granted:
+            self.status.text = '未获得麦克风权限，请在系统设置中允许后重试。'
+            return
         if not VoiceRecognizer().is_available():
             message_dialog('无法语音识别',
                            '当前设备不支持语音识别，请使用键盘输入。')
             return
+        self._set_listening(True)
         self.status.text = '正在聆听，请说出血压和脉搏…'
-        self.mic.text = '⏹  聆听中…'
         self.vr = VoiceRecognizer(
             on_result=self.on_voice,
+            on_partial=self._on_partial,
             on_error=self.on_voice_err,
-            on_ready=lambda: self.set_status('可以开始说话了…'))
+            on_ready=lambda: self.set_status('正在输入… 请继续说'))
         self.vr.start()
+
+    def _on_partial(self, text):
+        def ui(dt):
+            if text:
+                self.status.text = '正在输入：%s' % text
+        Clock.schedule_once(ui, 0)
 
     def set_status(self, txt):
         def ui(dt):
@@ -596,7 +707,8 @@ class AddScreen(Screen):
 
     def on_voice(self, text):
         def ui(dt):
-            self.mic.text = icons.im('mic') + '  语音输入'
+            self.vr = None
+            self._set_listening(False)
             parsed = parse_voice_text(text)
             s, d, p = (parsed['systolic'], parsed['diastolic'],
                        parsed['pulse'])
@@ -614,7 +726,8 @@ class AddScreen(Screen):
 
     def on_voice_err(self, msg):
         def ui(dt):
-            self.mic.text = icons.im('mic') + '  语音输入'
+            self.vr = None
+            self._set_listening(False)
             self.status.text = msg
         Clock.schedule_once(ui, 0)
 
@@ -713,6 +826,7 @@ class AnalysisScreen(Screen):
         body.bind(minimum_height=lambda i, v: setattr(i, 'height', v))
         scroll.add_widget(body)
         root.add_widget(scroll)
+        self.scroll = scroll
         self.body = body
 
         seg = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
@@ -761,7 +875,9 @@ class AnalysisScreen(Screen):
         body.add_widget(self.dist_card)
         self.add_widget(root)
         self.bind(on_pre_enter=lambda *a:
-                  Clock.schedule_once(lambda dt: self.refresh(), 0))
+                  Clock.schedule_once(lambda dt: (
+                      self.refresh(),
+                      setattr(self.scroll, 'scroll_y', 1.0)), 0))
 
     # ---------------- 数据 ----------------
     def _records(self):
@@ -1112,6 +1228,8 @@ class ProfileScreen(Screen):
         c2 = Card()
         c2.add_widget(L('数据管理', 15, theme.TEXT, bold=True))
         c2.add_widget(self._btn('导出 CSV 表格', 'export_csv'))
+        c2.add_widget(L('导出后可直接分享到微信 / 邮件', 11,
+                        theme.TEXT_LIGHT))
         c2.add_widget(self._btn('本地备份数据库', 'backup_db'))
         c2.add_widget(self._btn('清空全部数据', 'clear_all',
                                 color=theme.DANGER))
@@ -1139,7 +1257,18 @@ class ProfileScreen(Screen):
         try:
             self.app.db.export_csv(path)
             n = len(self.app.db.get_all())
-            message_dialog('导出成功', '已导出 %d 条记录：\n%s' % (n, path))
+            shared = False
+            try:
+                shared = share.share_file(path, title='分享血压数据')
+            except Exception:
+                shared = False
+            if shared:
+                message_dialog('导出成功',
+                               '已导出 %d 条记录，系统分享面板已打开，\n'
+                               '可选择微信、邮件等应用发送。' % n)
+            else:
+                message_dialog('导出成功',
+                               '已导出 %d 条记录：\n%s' % (n, path))
         except Exception as e:
             message_dialog('导出失败', str(e))
 

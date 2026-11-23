@@ -22,6 +22,10 @@ PALETTES = {
         'ORANGE': '#FF8F2B',
         'DANGER': '#FF4757',
         'LOW': '#54A0FF',
+        # 输入框专用（比卡片亮，避免看起来“置灰”）
+        'FIELD': '#2E3550',
+        'FIELD_BD': '#414B6E',
+        'HINT': '#A9B1C8',
     },
     False: {
         'BG': '#EEF2F9',
@@ -40,6 +44,9 @@ PALETTES = {
         'ORANGE': '#E56A00',
         'DANGER': '#E23A4B',
         'LOW': '#2F7FD1',
+        'FIELD': '#FFFFFF',
+        'FIELD_BD': '#CFD7E8',
+        'HINT': '#7A8398',
     },
 }
 

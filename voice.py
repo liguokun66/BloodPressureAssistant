@@ -40,7 +40,31 @@ class VoiceRecognizer:
         return None
 
     def is_available(self):
-        return self.backend() is not None
+        b = self.backend()
+        if b == 'android':
+            return self._android_available()
+        return b is not None
+
+    @staticmethod
+    def _has_mic_permission():
+        try:
+            from android.permissions import check_permission, Permission
+            return bool(check_permission(Permission.RECORD_AUDIO))
+        except Exception:
+            return True
+
+    def _android_available(self):
+        """系统是否存在可用的语音识别服务（Android 11+ 需要在 manifest 声明 queries）"""
+        try:
+            from jnius import autoclass
+            activity = autoclass('org.kivy.android.PythonActivity').mActivity
+            if activity is None:
+                return False
+            SpeechRecognizer = autoclass('android.speech.SpeechRecognizer')
+            return bool(SpeechRecognizer.isRecognitionAvailable(activity))
+        except Exception:
+            # 拿不准时放行，交给启动阶段的异常处理给出具体提示
+            return True
 
     # ---------------- 开始 / 停止 ----------------
     def start(self):
@@ -95,6 +119,25 @@ class VoiceRecognizer:
         RecognizerIntent = autoclass('android.speech.RecognizerIntent')
         SpeechRecognizer = autoclass('android.speech.SpeechRecognizer')
         PythonActivity = autoclass('org.kivy.android.PythonActivity')
+
+        try:
+            activity = PythonActivity.mActivity
+        except Exception:
+            activity = None
+        if activity is None:
+            self._fire_error('无法获取应用界面，请重启应用后再试。')
+            return
+        if not self._has_mic_permission():
+            self._fire_error('没有麦克风权限：请在系统设置里允许使用麦克风后重试。')
+            return
+        try:
+            if not SpeechRecognizer.isRecognitionAvailable(activity):
+                self._fire_error('当前设备没有可用的语音识别服务，\n'
+                                 '（部分机型需安装/启用 Google 语音识别）\n'
+                                 '请使用键盘输入。')
+                return
+        except Exception:
+            pass
 
         outer = self
 
@@ -169,7 +212,6 @@ class VoiceRecognizer:
                 pass
 
         try:
-            activity = PythonActivity.mActivity
             self._recognizer = SpeechRecognizer.createSpeechRecognizer(activity)
             self._android_listener = _Listener()
             self._recognizer.setRecognitionListener(self._android_listener)
@@ -187,6 +229,7 @@ class VoiceRecognizer:
             self._recognizer.startListening(intent)
         except Exception as e:
             self._listening = False
+            self._recognizer = None
             self._fire_error('启动语音识别失败：%s' % e)
 
     # ---------------- 桌面实现 ----------------

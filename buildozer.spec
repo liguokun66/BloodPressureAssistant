@@ -16,7 +16,7 @@ source.dir = .
 source.include_exts = py,png,jpg,jpeg,kv,ttf,otf,db,md
 
 # 包含的资源目录
-source.include_patterns = assets/*,assets/*/*,data/*,README.md
+source.include_patterns = assets/*,assets/*/*,data/*,README.md,extra_manifest.xml
 
 # 版本号
 version = 1.0
@@ -43,6 +43,10 @@ android.ndk = 25b
 
 # 非交互环境下自动接受 SDK 许可证（CI 必需）
 android.accept_sdk_license = True
+
+# 额外注入到 AndroidManifest.xml：声明可查询系统语音识别服务，
+# 修复 Android 11+ 包可见性导致的语音识别不可用问题
+android.extra_manifest_xml = extra_manifest.xml
 
 # 固定 python-for-android 版本。
 # master 分支已改用 Python 3.14 构建宿主解释器，与 Kivy 2.2.1 自带的

@@ -56,6 +56,10 @@ GLYPHS = {
     'circle':       '\uef4a',
     'blood':        '\uefe4',   # bloodtype
     'scope':        '\ueaa2',   # monitor_heart
+    'arrow_back':   '\ue5c4',   # arrow_back
+    'share':        '\ue80d',   # share
+    'chevron_left': '\ue5cb',
+    'copy':         '\ue14d',
 }
 
 # 知识库 kind -> 图标名
