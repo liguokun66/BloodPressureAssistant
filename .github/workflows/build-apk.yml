@@ -34,10 +34,23 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install buildozer "cython<3.0"
 
+      # 预先写入 SDK 许可证，避免 sdkmanager 交互询问导致构建失败
+      - name: Pre-accept Android SDK licenses
+        run: |
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          mkdir -p "$SDK/licenses"
+          printf '%s\n' \
+            8933bad161af4178b1185d1a37fbf41ea5269c55 \
+            d56f5187479451eabf01fb78af6dfcb131a6481e \
+            24333f8a63b6825ea9c5514f83c2829b004d1fee \
+            d975f751698a77b662f1254ddbeed3901e976f5a \
+            > "$SDK/licenses/android-sdk-license"
+          ls -l "$SDK/licenses"
+
       - name: Build debug APK
         run: |
           set -o pipefail
-          buildozer android debug 2>&1 | tee build.log
+          (yes | buildozer android debug) 2>&1 | tee build.log
         timeout-minutes: 80
 
       - name: Upload APK
