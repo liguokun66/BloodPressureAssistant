@@ -41,6 +41,9 @@ android.minapi = 21
 android.sdk = 33
 android.ndk = 25b
 
+# 非交互环境下自动接受 SDK 许可证（CI 必需）
+android.accept_sdk_license = True
+
 # 目标架构（安卓手机通常为 arm64-v8a）
 android.archs = arm64-v8a,armeabi-v7a
 
