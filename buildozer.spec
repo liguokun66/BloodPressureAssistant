@@ -49,8 +49,8 @@ android.accept_sdk_license = True
 # Cython 0.29 构建链不兼容（会报 ModuleNotFoundError: No module named 'cgi'）。
 p4a.branch = v2024.01.21
 
-# 目标架构（安卓手机通常为 arm64-v8a）
-android.archs = arm64-v8a,armeabi-v7a
+# 目标架构：现在手机基本都是 arm64；只留一个可让 APK 体积减半
+android.archs = arm64-v8a
 
 # 允许访问外部存储（导出 CSV 到下载目录时可选）
 # android.permissions = RECORD_AUDIO,INTERNET,WRITE_EXTERNAL_STORAGE
