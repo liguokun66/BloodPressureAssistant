@@ -377,7 +377,8 @@ class HomeScreen(Screen):
         self.add_btn = B('＋  添加记录', bg=theme.PRIMARY, height=52,
                          size=16, bold=True, radius=14,
                          on_press=lambda i: self.app.goto('add'),
-                         on_long_press=lambda *a: self.start_voice())
+                         on_long_press=lambda *a: self.start_voice(),
+                         on_long_press_release=lambda *a: self.stop_voice())
         bottom.add_widget(self.add_btn)
         root.add_widget(bottom)
         self.add_widget(root)
@@ -427,7 +428,7 @@ class HomeScreen(Screen):
             self.wave.stop()
 
     def start_voice(self):
-        """长按「添加记录」：在当前页面直接语音录入，不跳转"""
+        """长按「添加记录」：按住说话，松开结束（push-to-talk）"""
         if self.vr is not None:
             return
         ensure_mic(self._do_start_voice)
@@ -442,13 +443,31 @@ class HomeScreen(Screen):
                            '当前设备不支持语音识别，请使用键盘输入。')
             return
         self.voice_running(True)
-        self.hint.text = '正在聆听，请说出血压和脉搏…'
+        self.hint.text = '按住说话，松开结束…'
+        self._voice_wait = False
         self.vr = VoiceRecognizer(
             on_result=self._quick_result,
             on_partial=self._quick_partial,
             on_error=self._quick_err,
             on_ready=lambda: self._quick_status('正在输入… 请继续说'))
         self.vr.start()
+
+    def stop_voice(self):
+        """松手：停止录音并等待识别结果；长时间无回调则复位提示"""
+        vr, self.vr = self.vr, None
+        if vr is None:
+            return
+        vr.stop()
+        self.hint.text = '已松开，正在识别…'
+        self._voice_wait = True
+        Clock.schedule_once(lambda dt: self._stop_guard(), 8)
+
+    def _stop_guard(self):
+        if getattr(self, '_voice_wait', False):
+            self._voice_wait = False
+            self.voice_running(False)
+            self.hint.text = '未听到清晰语音，请按住按钮重说。'
+            Clock.schedule_once(lambda dt: self._restore_hint(), 2.5)
 
     def _quick_partial(self, text):
         def ui(dt):
@@ -463,6 +482,7 @@ class HomeScreen(Screen):
 
     def _quick_result(self, text):
         def ui(dt):
+            self._voice_wait = False
             self.vr = None
             self.voice_running(False)
             parsed = parse_voice_text(text)
@@ -483,6 +503,7 @@ class HomeScreen(Screen):
 
     def _quick_err(self, msg):
         def ui(dt):
+            self._voice_wait = False
             self.vr = None
             self.voice_running(False)
             self.hint.text = msg
@@ -574,7 +595,8 @@ class AddScreen(Screen):
             try:
                 import kbdbg
                 kb = kbdbg.KB
-                kbs = 'kb=%d/%d' % (kb['req'], kb['shown'])
+                kbs = 'kb=%d/%d i=%s' % (kb['req'], kb['shown'],
+                                         kb.get('imm', '-'))
                 if kb.get('err'):
                     kbs += '!' + str(kb['err'])[:18]
             except Exception:

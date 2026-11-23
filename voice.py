@@ -12,6 +12,35 @@ import traceback
 from kivy.logger import Logger
 
 
+def _run_on_ui(fn):
+    """在 Android 主（UI）线程执行 fn；拿不到 activity 时直接执行。"""
+    try:
+        from jnius import autoclass, PythonJavaClass, java_method
+        activity = autoclass('org.kivy.android.PythonActivity').mActivity
+
+        class _Task(PythonJavaClass):
+            __javainterfaces__ = ['java/lang/Runnable']
+
+            def __init__(self, f):
+                super().__init__()
+                self._f = f
+
+            @java_method('()V')
+            def run(self):
+                try:
+                    self._f()
+                except Exception:
+                    Logger.info('voice: ui task failed\n%s'
+                                % traceback.format_exc())
+
+        if activity is not None:
+            activity.runOnUiThread(_Task(fn))
+        else:
+            fn()
+    except Exception:
+        fn()
+
+
 class VoiceRecognizer:
     """语音识别封装，支持 Android / 桌面"""
 
@@ -83,8 +112,9 @@ class VoiceRecognizer:
     def stop(self):
         self._listening = False
         try:
-            if self._recognizer is not None and self.backend() == 'android':
-                self._recognizer.stopListening()
+            rec = self._recognizer
+            if rec is not None and self.backend() == 'android':
+                _run_on_ui(lambda: rec.stopListening())
         except Exception:
             pass
         try:
@@ -117,32 +147,7 @@ class VoiceRecognizer:
         要求在主 Looper 上创建，否则会抛
         “SpeechRecognizer should be used only with the main thread”。
         """
-        try:
-            from jnius import autoclass, PythonJavaClass, java_method
-            activity = autoclass('org.kivy.android.PythonActivity').mActivity
-
-            class _Task(PythonJavaClass):
-                __javainterfaces__ = ['java/lang/Runnable']
-
-                def __init__(self, fn):
-                    super().__init__()
-                    self._fn = fn
-
-                @java_method('()V')
-                def run(self):
-                    try:
-                        self._fn()
-                    except Exception:
-                        Logger.info('voice: ui task failed\n%s'
-                                    % traceback.format_exc())
-
-            if activity is not None:
-                activity.runOnUiThread(_Task(self._start_android_ui))
-            else:
-                self._start_android_ui()
-        except Exception:
-            # 拿不到 jnius / activity 时走原路径（不影响桌面）
-            self._start_android_ui()
+        _run_on_ui(self._start_android_ui)
 
     def _start_android_ui(self):
         try:

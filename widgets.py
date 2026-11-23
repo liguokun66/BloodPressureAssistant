@@ -51,10 +51,12 @@ def L(text, size=14, color=None, bold=False, align='left',
 
 # ---------------- 按钮 ----------------
 class _LPButton(Button):
-    """支持长按的按钮（on_long_press）"""
+    """支持长按的按钮（on_long_press / on_long_press_release）"""
 
-    def __init__(self, on_long_press=None, long_delay=0.55, **kwargs):
+    def __init__(self, on_long_press=None, on_long_press_release=None,
+                 long_delay=0.55, **kwargs):
         self._lp_cb = on_long_press
+        self._lp_cb_up = on_long_press_release
         self._lp_delay = long_delay
         self._lp_timer = None
         self._lp_down = False
@@ -62,6 +64,9 @@ class _LPButton(Button):
         if on_long_press is not None:
             self.register_event_type('on_long_press')
             self.bind(on_long_press=on_long_press)
+        if on_long_press_release is not None:
+            self.register_event_type('on_long_press_release')
+            self.bind(on_long_press_release=on_long_press_release)
         super().__init__(**kwargs)
 
     def on_touch_down(self, touch):
@@ -88,8 +93,10 @@ class _LPButton(Button):
             self._lp_timer = None
         self.state = 'normal'
         if self._lp_fired:
-            # 已作为长按处理，松手不再触发单击（避免误跳转）
+            # 已作为长按处理：松手派发 on_long_press_release（不再触发单击）
             self._lp_fired = False
+            if self._lp_cb_up is not None:
+                self.dispatch('on_long_press_release')
             return True
         if self.collide_point(*touch.pos):
             self.dispatch('on_press')
@@ -107,7 +114,8 @@ class _LPButton(Button):
 
 
 def B(text, bg=None, color=None, size=15, height=46, radius=10,
-      bold=False, on_press=None, on_long_press=None, size_hint_y=None,
+      bold=False, on_press=None, on_long_press=None,
+      on_long_press_release=None, size_hint_y=None,
       width=None, size_hint_x=None, opacity=None, long_delay=0.55,
       markup=False, font_name=None):
     bg = bg if bg is not None else theme.PRIMARY
@@ -123,8 +131,9 @@ def B(text, bg=None, color=None, size=15, height=46, radius=10,
         kwargs['size_hint_x'] = size_hint_x
     if width is not None:
         kwargs['width'] = dp(width)
-    btn = _LPButton(on_long_press=on_long_press, long_delay=long_delay,
-                    **kwargs)
+    btn = _LPButton(on_long_press=on_long_press,
+                    on_long_press_release=on_long_press_release,
+                    long_delay=long_delay, **kwargs)
     with btn.canvas.before:
         btn._ci = Color(rgba=C(bg))
         btn._bg = RoundedRectangle(pos=btn.pos, size=btn.size, radius=[dp(radius)])

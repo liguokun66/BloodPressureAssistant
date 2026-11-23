@@ -7,4 +7,5 @@ KB = {
     't': 0.0,      # 最近一次 request_keyboard 的时间戳
     'retry': False,  # 宽限期内是否已尝试重新唤起
     'err': '',     # 补丁自身异常
+    'imm': '-',    # InputMethodManager.showSoftInput：1 成功 / 0 返回 false / '-' 未尝试
 }
