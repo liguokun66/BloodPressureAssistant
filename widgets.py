@@ -641,11 +641,21 @@ def confirm_dialog(title, message, on_ok, ok_text='确定', cancel_text='取消'
 
 
 def message_dialog(title, message, ok_text='好的'):
+    """长文本放进可滚动区域，避免报错信息（如 Java 异常）被截断"""
     from kivy.uix.popup import Popup
+    from kivy.uix.scrollview import ScrollView
+    from kivy.uix.label import Label
     content = BoxLayout(orientation='vertical', padding=dp(18), spacing=dp(14))
-    content.add_widget(L(message, 15, theme.TEXT))
-    popup = Popup(title=title, content=content, size_hint=(0.86, None),
-                  height=dp(210), auto_dismiss=True,
+    sv = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+    lbl = Label(text=message, font_size=sp(13), font_name=theme.font(),
+                color=C(theme.TEXT), halign='left', valign='top',
+                markup=False, size_hint=(1, None))
+    lbl.bind(texture_size=lambda inst, val: setattr(
+        inst, 'height', val[1] + dp(6)))
+    sv.add_widget(lbl)
+    content.add_widget(sv)
+    popup = Popup(title=title, content=content, size_hint=(0.92, 0.72),
+                  auto_dismiss=True,
                   background='', background_color=C(theme.BG2),
                   separator_color=C(theme.PRIMARY))
     content.add_widget(B(ok_text, bg=theme.PRIMARY,

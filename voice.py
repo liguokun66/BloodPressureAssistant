@@ -257,7 +257,7 @@ class VoiceRecognizer:
         except Exception as e:
             self._listening = False
             self._recognizer = None
-            self._fire_error('启动语音识别失败：%s（%s）' % (type(e).__name__, e))
+            self._fire_error('Java 异常：%s\n详情：%s' % (type(e).__name__, e))
 
     # ---------------- 桌面实现 ----------------
     def _start_desktop(self):

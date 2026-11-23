@@ -540,6 +540,9 @@ class AddScreen(Screen):
         scroll.add_widget(body)
         root.add_widget(scroll)
 
+        self.dbg = L('', 10, theme.TEXT_LIGHT, valign='top')   # 临时诊断用
+        body.add_widget(self.dbg)
+
         c = Card()
         c.add_widget(L('测量时间', 13, theme.TEXT_LIGHT))
         row = BoxLayout(spacing=dp(10))
@@ -565,6 +568,37 @@ class AddScreen(Screen):
         for ti in (self.sys, self.dia, self.pul):
             ti.bind(on_text=lambda inst: self.highlight())
         body.add_widget(c2)
+
+        # ===== 临时诊断：定位安卓端「点击输入框键盘不弹出」=====
+        def _dbg(ev):
+            self.dbg.text = ('DBG %s | sys=%d dia=%d pul=%d'
+                             % (ev, int(bool(self.sys.focus)),
+                                int(bool(self.dia.focus)),
+                                int(bool(self.pul.focus))))
+        _dbg('就绪')
+
+        def _wrap(ti, name):
+            _orig = ti.on_touch_down
+
+            def _h(touch):
+                _res = _orig(touch)
+                _dbg('%s%s hit=%s focus=%d'
+                     % (name, '#' if ti.collide_point(*touch.pos) else '-',
+                        int(bool(_res)), int(bool(ti.focus))))
+                return _res
+            ti.on_touch_down = _h
+
+        for _ti, _nm in ((self.sys, 'sys'), (self.dia, 'dia'),
+                         (self.pul, 'pul'), (self.note, 'note')):
+            _wrap(_ti, _nm)
+
+        _oscr = self.on_touch_down
+
+        def _sh(touch):
+            _r = _oscr(touch)
+            _dbg('screen(%d,%d)' % (touch.x, touch.y))
+            return _r
+        self.on_touch_down = _sh
 
         vb = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10))
         self.mic = B(icons.im('mic') + '  语音输入', bg=theme.CARD_LIGHT,
