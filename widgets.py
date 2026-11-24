@@ -112,6 +112,9 @@ class _LPButton(Button):
     def on_long_press(self):
         pass
 
+    def on_long_press_release(self):
+        pass
+
 
 def B(text, bg=None, color=None, size=15, height=46, radius=10,
       bold=False, on_press=None, on_long_press=None,
