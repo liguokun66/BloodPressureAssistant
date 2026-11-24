@@ -19,6 +19,17 @@ except Exception:  # 兼容极端情况下模块加载失败
     VoskOfflineRecognizer = None
 
 
+def _short_reason(msg):
+    """把 OFFLINE_*_FAIL:<类型>:<详情> 压成一行可读原因（供 Toast 与 DBG）。"""
+    s = msg.split(':', 1)[1] if ':' in msg else msg
+    for pre in ('JVM exception occurred: ', 'JavaException:', 'JavaError:',
+                'NameError:'):
+        if s.startswith(pre):
+            s = s[len(pre):]
+    s = s.strip()
+    return s[:80]
+
+
 def _run_on_ui(fn):
     """在 Android 主（UI）线程执行 fn；拿不到 activity 时直接执行。"""
     try:
@@ -142,10 +153,7 @@ class VoiceRecognizer:
             outer._fire_ready()
 
         def off_error(msg):
-            short = ''
-            if ':' in msg:
-                tail = msg.split(':', 1)[1]
-                short = tail[:60]
+            short = _short_reason(msg)
             if msg.startswith('OFFLINE_MODEL_FAIL') \
                     or msg.startswith('OFFLINE_START_FAIL'):
                 # 离线引擎不可用：先告知原因，再回退到系统 SpeechRecognizer

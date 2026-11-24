@@ -5,6 +5,12 @@
 - 无需网络、无需系统 SpeechRecognizer；模型随 APK 打包（assets/vosk-model）
 - 首次使用时把 assets 里的模型解压到 user_data_dir/vosk-model（之后复用）
 
+⚠️ 线程约束（真机踩坑结论）：
+  Android 的 JNI FindClass 在「非主线程」只能用系统类加载器，看不到应用
+  自己的 dex，于是 autoclass('org.vosk.Model') 会抛 ClassNotFoundException。
+  因此所有 Java 类的解析必须先在主（UI）线程完成一次；pyjnius 解析后会存进
+  进程内 jclass_register，之后任意线程再 autoclass 都直接命中缓存。
+
 对外接口与 voice.VoiceRecognizer 保持一致：
     VoskOfflineRecognizer(on_result, on_partial, on_error, on_ready)
     .start() / .stop() / .cancel() / .busy()
@@ -69,6 +75,49 @@ class VoskOfflineRecognizer:
         self._preparing = False
         self._started = False
         self._failed = False
+        self._primed = False
+
+    # ---------------- Java 类解析（必须在主线程） ----------------
+    def _jc(self, attr, name):
+        """取已缓存的 Java 类；没有则现解析（仅在主线程安全）。"""
+        c = getattr(self, attr, None)
+        if c is None:
+            c = self._autoclass_safe(name)
+            setattr(self, attr, c)
+        return c
+
+    def _prime_java_classes(self):
+        """在主（UI）线程把所有会用到的 Java 类解析一遍并缓存。"""
+        from jnius import autoclass  # noqa: F401
+        self._jc('_ClsActivity', 'org.kivy.android.PythonActivity')
+        self._jc('_ClsModel', 'org.vosk.Model')
+        self._jc('_ClsRecognizer', 'org.vosk.Recognizer')
+        self._jc('_ClsSpeechService', 'org.vosk.android.SpeechService')
+        self._primed = True
+
+    def _run_on_ui_blocking(self, fn, timeout=15.0):
+        """把 fn 丢到 Android 主线程执行并等结果；失败时把异常抛回调用方。
+
+        Activity.runOnUiThread 在「当前线程就是 UI 线程」时会立即内联执行，
+        所以从 Kivy 主循环调用不会死锁。
+        """
+        box = {}
+        done = threading.Event()
+
+        def task():
+            try:
+                box['r'] = fn()
+            except Exception as e:  # noqa: BLE001
+                box['e'] = e
+            finally:
+                done.set()
+
+        _run_on_ui(task)
+        if not done.wait(timeout):
+            raise RuntimeError('主线程任务超时')
+        if 'e' in box:
+            raise box['e']
+        return box.get('r')
 
     # ---------------- 状态查询 ----------------
     @staticmethod
@@ -132,7 +181,7 @@ class VoskOfflineRecognizer:
         d = self.model_dir()
         if not self._model_files_ok(d):
             self._copy_assets(d)
-        Model = self._autoclass_safe('org.vosk.Model')
+        Model = self._jc('_ClsModel', 'org.vosk.Model')
         return Model(d)
 
     @staticmethod
@@ -142,8 +191,8 @@ class VoskOfflineRecognizer:
 
     def _copy_assets(self, dst_dir):
         """把 assets/vosk-model 整棵目录树复制到 dst_dir。"""
-        from jnius import autoclass
-        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+        PythonActivity = self._jc('_ClsActivity',
+                                  'org.kivy.android.PythonActivity')
         ctx = PythonActivity.mActivity
         if ctx is None:
             raise RuntimeError('无法获取应用上下文')
@@ -193,6 +242,19 @@ class VoskOfflineRecognizer:
         self._preparing = True
         kbdbg.KB['eng'] = 'vosk'
         kbdbg.KB['vk'] = 'prepare'
+        # 关键：Java 类必须在主线程解析（子线程 FindClass 看不到应用 dex）
+        try:
+            self._run_on_ui_blocking(self._prime_java_classes)
+        except Exception as e:
+            Logger.info('vosk: Java 类准备失败 %s（%s）\n%s'
+                        % (type(e).__name__, e,
+                           __import__('traceback').format_exc()))
+            self._failed = True
+            self._preparing = False
+            kbdbg.KB['vk'] = 'err:prime:%s' % type(e).__name__
+            self._fire_error('OFFLINE_MODEL_FAIL:%s:%s'
+                             % (type(e).__name__, e))
+            return
         threading.Thread(target=self._prepare_worker, daemon=True).start()
 
     def _prepare_worker(self):
@@ -220,9 +282,9 @@ class VoskOfflineRecognizer:
     def _start_ui(self, model):
         try:
             kbdbg.KB['vk'] = 'recognizer'
-            Recognizer = self._autoclass_safe('org.vosk.Recognizer')
-            SpeechService = self._autoclass_safe(
-                'org.vosk.android.SpeechService')
+            Recognizer = self._jc('_ClsRecognizer', 'org.vosk.Recognizer')
+            SpeechService = self._jc('_ClsSpeechService',
+                                     'org.vosk.android.SpeechService')
             self._recognizer = Recognizer(model, SAMPLE_RATE)
             kbdbg.KB['vk'] = 'service'
             self._service = SpeechService(self._recognizer, SAMPLE_RATE)

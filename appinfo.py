@@ -5,4 +5,4 @@
 """
 
 APP_NAME = '血压记录助手'
-APP_VERSION = '1.0.27'
+APP_VERSION = '1.0.28'
