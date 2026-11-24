@@ -462,7 +462,7 @@ class BarChart(FloatLayout):
                 self._lbls.append(lb)
         # 柱顶状态标签（偏低/偏高/高血压，正常不显示）
         for cx, y_top, txt, col in tags:
-            lb = L(txt, 9, col, bold=True, align='center', width=dp(38))
+            lb = L(txt, 9, col, bold=True, align='center', width=38)
             lb.pos = (cx - dp(19), y_top + dp(1))
             self.add_widget(lb)
             self._lbls.append(lb)

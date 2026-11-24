@@ -595,8 +595,9 @@ class AddScreen(Screen):
             try:
                 import kbdbg
                 kb = kbdbg.KB
-                kbs = 'kb=%d/%d i=%s' % (
-                    kb['req'], kb['shown'], kb.get('imm', '-'))
+                kbs = 'kb=%d/%d i=%s v=%s/%s' % (
+                    kb['req'], kb['shown'], kb.get('imm', '-'),
+                    kb.get('svc', '-'), kb.get('nw', '-'))
                 if kb.get('err'):
                     kbs += '!' + str(kb['err'])[:18]
             except Exception:
@@ -1026,12 +1027,13 @@ class AnalysisScreen(Screen):
                 ('平均低压', round(sum(r['diastolic'] for r in recs) / n, 1), 'mmHg'),
                 ('平均脉搏', round(sum(r['pulse'] for r in recs) / n, 1), 'BPM'),
             ]
-            row = BoxLayout(spacing=dp(6))
+            row = BoxLayout(spacing=dp(8))
             for nm, val, unit in cells:
-                cell = BoxLayout(orientation='vertical', spacing=dp(1))
+                cell = BoxLayout(orientation='vertical', spacing=dp(2),
+                                 size_hint=(1, None), padding=[0, dp(2)])
                 cell.add_widget(L(nm, 11, theme.TEXT_LIGHT))
-                cell.add_widget(L(str(val), 26, theme.TEXT, bold=True))
-                cell.add_widget(L(unit, 10, theme.TEXT_LIGHT))
+                cell.add_widget(L(str(val), 23, theme.TEXT, bold=True))
+                cell.add_widget(L(unit, 9, theme.TEXT_LIGHT))
                 row.add_widget(cell)
             self.avg_card.add_widget(row)
             self.avg_card.add_widget(
@@ -1059,7 +1061,7 @@ class AnalysisScreen(Screen):
         for name, ckey in self.LEVELS:
             cnt = counts.get(name, 0)
             row = BoxLayout(size_hint_y=None, height=dp(24), spacing=dp(10))
-            row.add_widget(L(name, 12, theme.TEXT_LIGHT, width=dp(64)))
+            row.add_widget(L(name, 12, theme.TEXT_LIGHT, width=64))
             row.add_widget(HBar(ratio=cnt / total,
                                 color=getattr(theme, ckey)))
             row.add_widget(L('%d 条 · %.0f%%' % (cnt, cnt / total * 100),
@@ -1318,15 +1320,29 @@ class ProfileScreen(Screen):
                  on_press=lambda inst, m=method: getattr(self, m)())
 
     # ---------------- 操作 ----------------
+    _CSV_REQ = 4242
+
     def export_csv(self):
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        path = os.path.join(self.app.user_data_dir, 'bp_export_%s.csv' % ts)
+        name = 'bp_export_%s.csv' % ts
+        tmp = os.path.join(self.app.user_data_dir, name)
         try:
-            self.app.db.export_csv(path)
+            self.app.db.export_csv(tmp)
             n = len(self.app.db.get_all())
+            with open(tmp, 'rb') as f:
+                blob = f.read()
+        except Exception as e:
+            message_dialog('导出失败', str(e))
+            return
+        try:
+            from kivy.utils import platform
+            is_android = (platform == 'android')
+        except Exception:
+            is_android = False
+        if not is_android:
             shared = False
             try:
-                shared = share.share_file(path, title='分享血压数据')
+                shared = share.share_file(tmp, title='分享血压数据')
             except Exception:
                 shared = False
             if shared:
@@ -1335,9 +1351,65 @@ class ProfileScreen(Screen):
                                '可选择微信、邮件等应用发送。' % n)
             else:
                 message_dialog('导出成功',
-                               '已导出 %d 条记录：\n%s' % (n, path))
-        except Exception as e:
-            message_dialog('导出失败', str(e))
+                               '已导出 %d 条记录：\n%s' % (n, tmp))
+            return
+        # Android：SAF 系统选择器（默认文件名，可改目录/文件名）
+        self._csv_pending = (name, blob, n)
+        try:
+            from jnius import autoclass
+            Intent = autoclass('android.content.Intent')
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            intent.setType('text/csv')
+            intent.putExtra(Intent.EXTRA_TITLE, name)
+            activity = PythonActivity.mActivity
+            from android import activity as _act
+            _act.bind(on_activity_result=self._on_csv_result)
+            activity.startActivityForResult(intent, self._CSV_REQ)
+            return
+        except Exception:
+            pass
+        # 回退：留在应用目录并尝试分享
+        shared = False
+        try:
+            shared = share.share_file(tmp, title='分享血压数据')
+        except Exception:
+            shared = False
+        if shared:
+            message_dialog('导出成功',
+                           '已导出 %d 条记录，系统分享面板已打开。' % n)
+        else:
+            message_dialog('导出成功',
+                           '已导出 %d 条记录：\n%s' % (n, tmp))
+
+    def _on_csv_result(self, request_code, result_code, data):
+        if request_code != self._CSV_REQ:
+            return
+        pending = getattr(self, '_csv_pending', None)
+        self._csv_pending = None
+        if pending is None:
+            return
+        name, blob, n = pending
+        if result_code == -1 and data is not None:   # RESULT_OK
+            try:
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                cr = PythonActivity.mActivity.getContentResolver()
+                uri = data.getData()
+                out = cr.openOutputStream(uri)
+                out.write(bytearray(blob))
+                out.flush()
+                out.close()
+                message_dialog('导出成功',
+                               '已保存 %d 条记录到所选位置。' % n)
+                return
+            except Exception as e:
+                message_dialog('保存失败', str(e))
+                return
+        tmp = os.path.join(self.app.user_data_dir, name)
+        message_dialog('已取消',
+                       '未选择保存位置。文件仍在应用目录：\n%s' % tmp)
 
     def backup_db(self):
         try:

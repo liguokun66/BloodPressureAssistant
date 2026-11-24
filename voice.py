@@ -11,6 +11,8 @@ import traceback
 
 from kivy.logger import Logger
 
+import kbdbg
+
 
 def _run_on_ui(fn):
     """在 Android 主（UI）线程执行 fn；拿不到 activity 时直接执行。"""
@@ -184,6 +186,23 @@ class VoiceRecognizer:
             Logger.info('voice: isRecognitionAvailable 失败 %s（%s）'
                         % (type(e).__name__, e))
 
+        # ---- 环境探测（写入 DBG 供排查）----
+        try:
+            Context = autoclass('android.content.Context')
+            pm = activity.getPackageManager()
+            svcs = pm.queryIntentServices(
+                Intent('android.speech.RecognitionService'), 0)
+            kbdbg.KB['svc'] = svcs.size() if svcs is not None else 0
+        except Exception:
+            kbdbg.KB['svc'] = '?'
+        try:
+            Context = autoclass('android.content.Context')
+            cm = activity.getSystemService(Context.CONNECTIVITY_SERVICE)
+            ni = cm.getActiveNetworkInfo()
+            kbdbg.KB['nw'] = 1 if (ni is not None and ni.isConnected()) else 0
+        except Exception:
+            kbdbg.KB['nw'] = '?'
+
         outer = self
 
         def _post(fn, *args):
@@ -224,6 +243,18 @@ class VoiceRecognizer:
 
             @java_method('(I)V')
             def onError(self, error):
+                # 从设备 SDK 反射出官方错误常量名（避免语义表记错）
+                ename = None
+                try:
+                    from jnius import autoclass
+                    SR = autoclass('android.speech.SpeechRecognizer')
+                    for f in SR.getClass().getFields():
+                        fn = f.getName()
+                        if fn.startswith('ERROR_') and f.getInt(None) == error:
+                            ename = fn
+                            break
+                except Exception:
+                    ename = None
                 msg_map = {
                     1: '音频错误',
                     2: '客户端错误',
@@ -232,13 +263,14 @@ class VoiceRecognizer:
                     5: '网络超时',
                     6: '没有识别到语音',
                     7: '识别服务忙',
-                    8: '服务器错误',
+                    8: '服务器错误（请检查网络与系统语音识别服务）',
                     9: '没有听到语音，请重试',
                 }
+                tail = (' ' + ename) if ename else ''
                 outer._listening = False
                 _post(outer._fire_error,
-                      '%s（错误码 %d）' % (
-                          msg_map.get(error, '识别失败'), error))
+                      '%s（错误码 %d%s）' % (
+                          msg_map.get(error, '识别失败'), error, tail))
 
             @java_method('(Landroid/os/Bundle;)V')
             def onResults(self, results):
