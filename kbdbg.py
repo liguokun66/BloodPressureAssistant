@@ -5,11 +5,8 @@ KB = {
     'req': 0,      # request_keyboard 被调用次数
     'shown': -1,   # SDL 认为软键盘是否可见：1 是 / 0 否 / -1 未检测
     't': 0.0,      # 最近一次 request_keyboard 的时间戳
-    'retry': False,  # 宽限期内是否已尝试重新唤起
+    'retry': False,  # 是否已启动重试定时器
     'err': '',     # 补丁自身异常
     'imm': '-',    # InputMethodManager.showSoftInput：1 成功 / 0 返回 false / '-' 未尝试
-    'foc': 0,      # FocusBehavior._on_focus 触发次数
-    'bind': 0,     # FocusBehavior._bind_keyboard 触发次数
-    'ens': 0,      # FocusBehavior._ensure_keyboard 触发次数
-    'km': '-',     # 最近一次 focus 时的 keyboard_mode 值
+    'n': 0,        # 重试次数（每 0.5s 一次）
 }

@@ -253,6 +253,9 @@ class FieldInput(TextInput):
     def _on_focus(self, inst, val):
         self._focused = val
         self._apply_border()
+        # 关键：交回 FocusBehavior 处理，否则「焦点→请求软键盘」链路
+        # 被这里整个吞掉（表现为点输入框永远不出系统键盘）
+        super()._on_focus(inst, val)
 
     def _apply_border(self):
         if self._hl is not None:
