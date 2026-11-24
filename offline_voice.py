@@ -132,7 +132,7 @@ class VoskOfflineRecognizer:
         d = self.model_dir()
         if not self._model_files_ok(d):
             self._copy_assets(d)
-        Model = _autoclass_safe('org.vosk.Model')
+        Model = self._autoclass_safe('org.vosk.Model')
         return Model(d)
 
     @staticmethod
@@ -205,12 +205,13 @@ class VoskOfflineRecognizer:
             model = self._ensure_model()
             kbdbg.KB['vk'] = 'model_ok'
         except Exception as e:
-            Logger.info('vosk: 模型准备失败 %s（%s）'
-                        % (type(e).__name__, e))
+            Logger.info('vosk: 模型准备失败 %s（%s）\n%s'
+                        % (type(e).__name__, e,
+                           __import__('traceback').format_exc()))
             self._failed = True
             self._preparing = False
             kbdbg.KB['vk'] = 'err:%s' % type(e).__name__
-            self._fire_error('OFFLINE_MODEL_FAIL:%s（%s）'
+            self._fire_error('OFFLINE_MODEL_FAIL:%s:%s'
                              % (type(e).__name__, e))
             return
         # 创建 Recognizer / SpeechService 需要在主 Looper 线程
@@ -235,12 +236,14 @@ class VoskOfflineRecognizer:
             kbdbg.KB['vk'] = 'done'
             self._fire_ready()
         except Exception as e:
-            Logger.info('vosk: 启动失败 %s（%s）' % (type(e).__name__, e))
+            Logger.info('vosk: 启动失败 %s（%s）\n%s'
+                        % (type(e).__name__, e,
+                           __import__('traceback').format_exc()))
             self._failed = True
             self._preparing = False
             kbdbg.KB['vk'] = 'err:%s' % type(e).__name__
             self._cleanup_java()
-            self._fire_error('OFFLINE_START_FAIL:%s（%s）'
+            self._fire_error('OFFLINE_START_FAIL:%s:%s'
                              % (type(e).__name__, e))
 
     def stop(self):

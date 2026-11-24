@@ -145,7 +145,7 @@ class VoiceRecognizer:
             short = ''
             if ':' in msg:
                 tail = msg.split(':', 1)[1]
-                short = tail.split('（')[0][:40]
+                short = tail[:60]
             if msg.startswith('OFFLINE_MODEL_FAIL') \
                     or msg.startswith('OFFLINE_START_FAIL'):
                 # 离线引擎不可用：先告知原因，再回退到系统 SpeechRecognizer
