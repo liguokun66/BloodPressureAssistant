@@ -13,6 +13,11 @@ from kivy.logger import Logger
 
 import kbdbg
 
+try:
+    from offline_voice import VoskOfflineRecognizer
+except Exception:  # 兼容极端情况下模块加载失败
+    VoskOfflineRecognizer = None
+
 
 def _run_on_ui(fn):
     """在 Android 主（UI）线程执行 fn；拿不到 activity 时直接执行。"""
@@ -55,6 +60,8 @@ class VoiceRecognizer:
         self._recognizer = None
         self._android_listener = None
         self._sr_recognizer = None
+        self._offline = None
+        self._engine = None
         self._listening = False
 
     # ---------------- 可用性检测 ----------------
@@ -75,6 +82,9 @@ class VoiceRecognizer:
     def is_available(self):
         b = self.backend()
         if b == 'android':
+            if VoskOfflineRecognizer is not None \
+                    and VoskOfflineRecognizer.supported():
+                return True
             return self._android_available()
         return b is not None
 
@@ -105,13 +115,63 @@ class VoiceRecognizer:
             return
         b = self.backend()
         if b == 'android':
-            self._start_android()
+            if VoskOfflineRecognizer is not None \
+                    and VoskOfflineRecognizer.supported():
+                self._start_offline()
+            else:
+                self._start_android()
         elif b == 'desktop':
             self._start_desktop()
         else:
             self._fire_error('当前设备不支持语音识别，请使用键盘输入。')
 
+    def _start_offline(self):
+        """优先使用 Vosk 离线识别；模型/引擎初始化失败时回退系统识别。"""
+        self._engine = 'offline'
+        self._listening = True
+        outer = self
+
+        def off_result(text):
+            outer._listening = False
+            outer._fire_result(text)
+
+        def off_partial(text):
+            outer._fire_partial(text)
+
+        def off_ready():
+            outer._fire_ready()
+
+        def off_error(msg):
+            if msg.startswith('OFFLINE_MODEL_FAIL') \
+                    or msg.startswith('OFFLINE_START_FAIL'):
+                # 离线引擎不可用：回退到系统 SpeechRecognizer
+                Logger.info('voice: 离线引擎不可用，回退系统识别：%s' % msg)
+                outer._listening = False
+                kbdbg.KB['eng'] = 'sys-fallback'
+                outer._start_android()
+                return
+            outer._listening = False
+            outer._fire_error(msg)
+
+        self._offline = VoskOfflineRecognizer(
+            on_result=off_result,
+            on_partial=off_partial,
+            on_error=off_error,
+            on_ready=off_ready)
+        self._offline.start()
+
+    def engine(self):
+        """当前引擎：'offline'（Vosk 离线）/ 'android'（系统）/ 'desktop'"""
+        return getattr(self, '_engine', None) or (
+            'android' if self.backend() == 'android' else self.backend())
+
     def stop(self):
+        if self._engine == 'offline' and getattr(self, '_offline', None):
+            vr = self._offline
+            self._offline = None
+            self._listening = False
+            vr.stop()
+            return
         self._listening = False
         try:
             rec = self._recognizer

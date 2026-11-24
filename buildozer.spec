@@ -60,6 +60,12 @@ android.archs = arm64-v8a
 # 允许访问外部存储（导出 CSV 到下载目录时可选）
 # android.permissions = RECORD_AUDIO,INTERNET,WRITE_EXTERNAL_STORAGE
 
+# ===== 离线语音识别（Vosk）=====
+# vosk-android 通过 gradle 从 Maven Central 拉取（含传递依赖 jna aar）。
+android.gradle_dependencies = com.alphacephei:vosk-android:0.3.47, net.java.dev.jna:jna:5.13.0@aar
+# 中文小模型（CI 构建前下载到 models/ 并整树打进 assets/vosk-model）
+android.add_assets = models/vosk-model-small-cn-0.22:vosk-model
+
 # 图标与启动图（可选，把文件放到项目根目录后取消注释）
 # icon.filename = %(source.dir)s/assets/icon.png
 # presplash.filename = %(source.dir)s/assets/presplash.png

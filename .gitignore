@@ -5,3 +5,6 @@ __pycache__/
 shots/
 data/*.db
 t_*.py
+
+models/
+libs/
