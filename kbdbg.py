@@ -11,4 +11,6 @@ KB = {
     'n': 0,        # 重试次数（每 0.5s 一次）
     'svc': '?',    # 系统可用 RecognitionService 数量
     'nw': '?',     # 网络连接：1 通 / 0 不通 / '?' 未知
+    'eng': '-',    # 语音引擎：vosk / sys-fallback / sys / '-'
+    'vk': '-',    # Vosk 初始化阶段：unpack/model/rec/service/start/done/err:<原因>
 }

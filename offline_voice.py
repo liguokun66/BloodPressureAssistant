@@ -151,7 +151,13 @@ class VoskOfflineRecognizer:
 
         def copy_dir(asset_path, out_dir):
             names = am.list(asset_path)
-            names = list(names) if names is not None else []
+            if names is None:
+                names = []
+            else:
+                try:
+                    names = [names[i] for i in range(len(names))]
+                except Exception:
+                    names = list(names)
             if not names:
                 # 叶子：文件
                 os.makedirs(os.path.dirname(out_dir), exist_ok=True)
@@ -186,16 +192,24 @@ class VoskOfflineRecognizer:
             return
         self._preparing = True
         kbdbg.KB['eng'] = 'vosk'
+        kbdbg.KB['vk'] = 'prepare'
         threading.Thread(target=self._prepare_worker, daemon=True).start()
 
     def _prepare_worker(self):
         try:
+            d = self.model_dir()
+            if not self._model_files_ok(d):
+                kbdbg.KB['vk'] = 'unpack'
+                self._copy_assets(d)
+            kbdbg.KB['vk'] = 'model'
             model = self._ensure_model()
+            kbdbg.KB['vk'] = 'model_ok'
         except Exception as e:
             Logger.info('vosk: 模型准备失败 %s（%s）'
                         % (type(e).__name__, e))
             self._failed = True
             self._preparing = False
+            kbdbg.KB['vk'] = 'err:%s' % type(e).__name__
             self._fire_error('OFFLINE_MODEL_FAIL:%s（%s）'
                              % (type(e).__name__, e))
             return
@@ -204,22 +218,27 @@ class VoskOfflineRecognizer:
 
     def _start_ui(self, model):
         try:
+            kbdbg.KB['vk'] = 'recognizer'
             Recognizer = self._autoclass_safe('org.vosk.Recognizer')
             SpeechService = self._autoclass_safe(
                 'org.vosk.android.SpeechService')
             self._recognizer = Recognizer(model, SAMPLE_RATE)
+            kbdbg.KB['vk'] = 'service'
             self._service = SpeechService(self._recognizer, SAMPLE_RATE)
+            kbdbg.KB['vk'] = 'listen'
             self._listener = _VoskListener(self)
             ok = bool(self._service.startListening(self._listener))
             if not ok:
                 raise RuntimeError('startListening 返回 false')
             self._preparing = False
             self._started = True
+            kbdbg.KB['vk'] = 'done'
             self._fire_ready()
         except Exception as e:
             Logger.info('vosk: 启动失败 %s（%s）' % (type(e).__name__, e))
             self._failed = True
             self._preparing = False
+            kbdbg.KB['vk'] = 'err:%s' % type(e).__name__
             self._cleanup_java()
             self._fire_error('OFFLINE_START_FAIL:%s（%s）'
                              % (type(e).__name__, e))

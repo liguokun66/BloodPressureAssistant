@@ -142,13 +142,21 @@ class VoiceRecognizer:
             outer._fire_ready()
 
         def off_error(msg):
+            short = ''
+            if ':' in msg:
+                tail = msg.split(':', 1)[1]
+                short = tail.split('（')[0][:40]
             if msg.startswith('OFFLINE_MODEL_FAIL') \
                     or msg.startswith('OFFLINE_START_FAIL'):
-                # 离线引擎不可用：回退到系统 SpeechRecognizer
+                # 离线引擎不可用：先告知原因，再回退到系统 SpeechRecognizer
                 Logger.info('voice: 离线引擎不可用，回退系统识别：%s' % msg)
                 outer._listening = False
                 kbdbg.KB['eng'] = 'sys-fallback'
-                outer._start_android()
+                kbdbg.KB['vk'] = 'err:%s' % (short or 'unknown')
+                outer._fire_error('离线语音暂不可用(%s)，改用系统识别…' % short)
+                from kivy.clock import Clock
+                Clock.schedule_once(
+                    lambda dt: outer._start_android_resilient(), 2.0)
                 return
             outer._listening = False
             outer._fire_error(msg)
@@ -159,6 +167,15 @@ class VoiceRecognizer:
             on_error=off_error,
             on_ready=off_ready)
         self._offline.start()
+
+    def _start_android_resilient(self):
+        """回退启动系统识别（仅当当前确实未在识别时）"""
+        if self._listening:
+            return
+        try:
+            self._start_android()
+        except Exception:
+            pass
 
     def engine(self):
         """当前引擎：'offline'（Vosk 离线）/ 'android'（系统）/ 'desktop'"""

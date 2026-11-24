@@ -595,10 +595,10 @@ class AddScreen(Screen):
             try:
                 import kbdbg
                 kb = kbdbg.KB
-                kbs = 'kb=%d/%d i=%s v=%s/%s e=%s' % (
+                kbs = 'kb=%d/%d i=%s v=%s/%s e=%s vk=%s' % (
                     kb['req'], kb['shown'], kb.get('imm', '-'),
                     kb.get('svc', '-'), kb.get('nw', '-'),
-                    kb.get('eng', '-'))
+                    kb.get('eng', '-'), str(kb.get('vk', '-'))[:16])
                 if kb.get('err'):
                     kbs += '!' + str(kb['err'])[:18]
             except Exception:
