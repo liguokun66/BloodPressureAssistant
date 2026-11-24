@@ -38,6 +38,7 @@ def _run_on_ui(fn):
 
         class _Task(PythonJavaClass):
             __javainterfaces__ = ['java/lang/Runnable']
+            __javacontext__ = 'app'
 
             def __init__(self, f):
                 super().__init__()
@@ -407,6 +408,9 @@ except Exception:  # 桌面环境没有 pyjnius，仅占位
 class _VoskListener(PythonJavaClass):
     """org.vosk.android.RecognitionListener 的 PythonJavaClass 实现。"""
     __javainterfaces__ = ('org/vosk/android/RecognitionListener',)
+    # 关键：org.vosk.* 在应用 dex 里，系统类加载器看不到；必须用当前线程的
+    # ContextClassLoader（app 加载器）来建动态代理。
+    __javacontext__ = 'app'
 
     def __init__(self, owner):
         super().__init__()
