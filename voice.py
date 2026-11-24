@@ -237,7 +237,8 @@ class VoiceRecognizer:
                 }
                 outer._listening = False
                 _post(outer._fire_error,
-                      msg_map.get(error, '识别失败（错误码 %s）' % error))
+                      '%s（错误码 %d）' % (
+                          msg_map.get(error, '识别失败'), error))
 
             @java_method('(Landroid/os/Bundle;)V')
             def onResults(self, results):

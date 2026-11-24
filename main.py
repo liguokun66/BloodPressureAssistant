@@ -92,6 +92,46 @@ def patch_android_keyboard():
         kbdbg.KB['err'] = 'patch: %s: %s' % (type(e).__name__, e)
 
 
+def patch_focus_diag():
+    """真机诊断（临时）：统计 Kivy 焦点→键盘请求链路的各环节触发次数。
+
+    链路：focus=True → FocusBehavior._on_focus（keyboard_mode=='auto'）
+          → _bind_keyboard → _ensure_keyboard
+          → EventLoop.window.request_keyboard。
+    计数写进 kbdbg.KB，DBG 行显示 f=/b=/e= 与 km=keyboard_mode。
+    """
+    try:
+        from kivy.uix.behaviors.focus import FocusBehavior
+        if getattr(FocusBehavior, '_bp_diag', False):
+            return
+
+        _orig_on_focus = FocusBehavior._on_focus
+
+        def _on_focus(self, instance, value, *largs):
+            kbdbg.KB['foc'] += 1
+            kbdbg.KB['km'] = str(getattr(self, 'keyboard_mode', '?'))
+            return _orig_on_focus(self, instance, value, *largs)
+
+        _orig_bind = FocusBehavior._bind_keyboard
+
+        def _bind_keyboard(self, *a, **k):
+            kbdbg.KB['bind'] += 1
+            return _orig_bind(self, *a, **k)
+
+        _orig_ensure = FocusBehavior._ensure_keyboard
+
+        def _ensure_keyboard(self, *a, **k):
+            kbdbg.KB['ens'] += 1
+            return _orig_ensure(self, *a, **k)
+
+        FocusBehavior._on_focus = _on_focus
+        FocusBehavior._bind_keyboard = _bind_keyboard
+        FocusBehavior._ensure_keyboard = _ensure_keyboard
+        FocusBehavior._bp_diag = True
+    except Exception as e:
+        kbdbg.KB['err'] = 'focusdiag: %s: %s' % (type(e).__name__, e)
+
+
 def register_chinese_font():
     """注册中文字体，保证中文正常显示"""
     roots = [
@@ -170,6 +210,7 @@ class BPMain(App):
             Window.size = (430, 860)
         if platform == 'android':
             patch_android_keyboard()
+            patch_focus_diag()
         register_chinese_font()
         icons.register()
         root = Root(self)

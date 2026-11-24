@@ -8,4 +8,8 @@ KB = {
     'retry': False,  # 宽限期内是否已尝试重新唤起
     'err': '',     # 补丁自身异常
     'imm': '-',    # InputMethodManager.showSoftInput：1 成功 / 0 返回 false / '-' 未尝试
+    'foc': 0,      # FocusBehavior._on_focus 触发次数
+    'bind': 0,     # FocusBehavior._bind_keyboard 触发次数
+    'ens': 0,      # FocusBehavior._ensure_keyboard 触发次数
+    'km': '-',     # 最近一次 focus 时的 keyboard_mode 值
 }
