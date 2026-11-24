@@ -33,62 +33,19 @@ FONT_FILES = [
 ]
 
 
-def _imm_show_soft_input():
-    """绕过 SDL，直接用 Android InputMethodManager 弹软键盘（兜底）。
-
-    部分机型上 SDL_IsScreenKeyboardShown 恒为 false / SDL 的 showSoftInput
-    不生效，导致 Kivy 刚请求键盘就被 release。这里从 Java 层直接要输入法。
-    结果写入 kbdbg.KB['imm']：1 成功调用 / 0 返回 false / 字符串为异常。
-    """
-    try:
-        from jnius import autoclass, PythonJavaClass, java_method
-        PythonActivity = autoclass('org.kivy.android.PythonActivity')
-        Context = autoclass('android.content.Context')
-        activity = PythonActivity.mActivity
-
-        if activity is None:
-            kbdbg.KB['imm'] = 0
-            return
-
-        class _Task(PythonJavaClass):
-            __javainterfaces__ = ['java/lang/Runnable']
-
-            def __init__(self):
-                super().__init__()
-
-            @java_method('()V')
-            def run(self):
-                try:
-                    imm = activity.getSystemService(
-                        Context.INPUT_METHOD_SERVICE)
-                    view = activity.getWindow().getDecorView()
-                    kbdbg.KB['imm'] = 1 if imm.showSoftInput(view, 0) else 0
-                except Exception as e:
-                    kbdbg.KB['imm'] = '%s' % type(e).__name__
-
-        activity.runOnUiThread(_Task())
-    except Exception as e:
-        kbdbg.KB['imm'] = '%s' % type(e).__name__
-
-
 def patch_android_keyboard():
     """安卓软键盘补丁（对应真机问题「点输入框键盘不弹出」）。
 
     现象：输入框 focus 正常，但系统输入法不出来。
-    根因（Kivy 2.2.1 window_sdl2.py）：request_keyboard 后每 0.2s 检查
-    `is_keyboard_shown()`，为 false 就立刻 release 键盘；部分机型该接口
-    始终返回 false，于是键盘永远被关掉。
+    怀疑：Kivy 在 request_keyboard 后每 0.2s 检查一次
+    `SDL_IsScreenKeyboardShown`，部分机型该接口始终返回 False，于是 Kivy
+    认定键盘没弹出来并把 keyboard release 掉（表现为永远看不到输入法）。
 
-    做法：
-    1) 打补丁后的 _check_keyboard_shown **永不自动 release**（失焦走正常
-       release_keyboard 路径）；
-    2) 请求键盘后 3s 内每 0.5s 重新 show_keyboard 一次（应对偶发失败）；
-    3) 同时用 pyjnius 直接调 InputMethodManager.showSoftInput 兜底；
-    状态写进 kbdbg.KB 供界面 DBG 行读取。
+    做法：刚请求键盘后的 4s 宽限期内不释放，并主动重新唤起一次；
+    同时把状态写进 kbdbg.KB，供界面上的 DBG 行读取。
     """
     try:
         import time
-        from kivy.clock import Clock
         from kivy.base import EventLoop
         cls = type(EventLoop.window)
         if getattr(cls, '_bp_patched', False):
@@ -102,26 +59,8 @@ def patch_android_keyboard():
             kbdbg.KB['shown'] = -1
             kbdbg.KB['t'] = time.time()
             kbdbg.KB['retry'] = False
-            kbdbg.KB['imm'] = '-'
-            res = _orig_req(self, callback, target, input_type,
-                            keyboard_suggestions)
-            kbdbg.KB['retry'] = True
-            # 3s 内每 0.5s 重试一次（SDL + IMM 双通道）
-            Clock.schedule_interval(lambda dt: _kb_retry(self), 0.5)
-            return res
-
-        def _kb_retry(win):
-            n = kbdbg.KB.get('n', 0) + 1
-            kbdbg.KB['n'] = n
-            if n > 6:
-                return False
-            try:
-                win._win.show_keyboard(win._system_keyboard,
-                                      win.softinput_mode, 'text', True)
-            except Exception as e:
-                kbdbg.KB['err'] = '%s: %s' % (type(e).__name__, e)
-            _imm_show_soft_input()
-            return True
+            return _orig_req(self, callback, target, input_type,
+                             keyboard_suggestions)
 
         def _check_keyboard_shown(self, dt):
             if self._sdl_keyboard is None:
@@ -131,7 +70,19 @@ def patch_android_keyboard():
             except Exception:
                 return False
             kbdbg.KB['shown'] = 1 if shown else 0
-            # 关键：不再因为 SDL 误判而 release 键盘
+            if shown:
+                return False
+            if time.time() - kbdbg.KB.get('t', 0) < 4.0:
+                if not kbdbg.KB.get('retry'):
+                    kbdbg.KB['retry'] = True
+                    try:
+                        self._win.show_keyboard(self._system_keyboard,
+                                                self.softinput_mode,
+                                                'text', True)
+                    except Exception as e:
+                        kbdbg.KB['err'] = '%s: %s' % (type(e).__name__, e)
+                return False
+            self._sdl_keyboard.release()
             return False
 
         cls.request_keyboard = request_keyboard
