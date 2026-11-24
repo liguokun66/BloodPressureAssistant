@@ -1027,10 +1027,12 @@ class AnalysisScreen(Screen):
                 ('平均低压', round(sum(r['diastolic'] for r in recs) / n, 1), 'mmHg'),
                 ('平均脉搏', round(sum(r['pulse'] for r in recs) / n, 1), 'BPM'),
             ]
-            row = BoxLayout(spacing=dp(8))
+            row = BoxLayout(spacing=dp(8), size_hint_y=None,
+                          height=dp(60))
             for nm, val, unit in cells:
+                # cell 用默认 size_hint=(1,1)：宽度均分、高度撑满 row
                 cell = BoxLayout(orientation='vertical', spacing=dp(2),
-                                 size_hint=(1, None), padding=[0, dp(2)])
+                                 padding=[0, dp(2)])
                 cell.add_widget(L(nm, 11, theme.TEXT_LIGHT))
                 cell.add_widget(L(str(val), 23, theme.TEXT, bold=True))
                 cell.add_widget(L(unit, 9, theme.TEXT_LIGHT))
