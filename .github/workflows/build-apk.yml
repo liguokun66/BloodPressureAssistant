@@ -72,6 +72,17 @@ jobs:
           PY
           grep -n '^version' buildozer.spec
 
+      # 中文离线语音模型（Vosk）：构建前下载解压到 models/，
+      # buildozer.spec 的 android.add_assets 会整树打进 APK assets/vosk-model
+      - name: Download Vosk Chinese model
+        run: |
+          mkdir -p models
+          curl -fL --retry 3 --connect-timeout 30 \
+            -o /tmp/vosk-model.zip \
+            https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip
+          unzip -q -o /tmp/vosk-model.zip -d models/
+          du -sh models/* || true
+
       - name: Build debug APK
         run: |
           set -o pipefail

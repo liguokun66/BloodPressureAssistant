@@ -443,7 +443,7 @@ class HomeScreen(Screen):
                            '当前设备不支持语音识别，请使用键盘输入。')
             return
         self.voice_running(True)
-        self.hint.text = '按住说话，松开结束…'
+        self.hint.text = '正在准备语音引擎…'
         self._voice_wait = False
         self.vr = VoiceRecognizer(
             on_result=self._quick_result,
@@ -595,9 +595,10 @@ class AddScreen(Screen):
             try:
                 import kbdbg
                 kb = kbdbg.KB
-                kbs = 'kb=%d/%d i=%s v=%s/%s' % (
+                kbs = 'kb=%d/%d i=%s v=%s/%s e=%s' % (
                     kb['req'], kb['shown'], kb.get('imm', '-'),
-                    kb.get('svc', '-'), kb.get('nw', '-'))
+                    kb.get('svc', '-'), kb.get('nw', '-'),
+                    kb.get('eng', '-'))
                 if kb.get('err'):
                     kbs += '!' + str(kb['err'])[:18]
             except Exception:
