@@ -12,8 +12,8 @@ PALETTES = {
         'CARD_LIGHT': '#323A55',
         'ACCENT': '#20263A',
         'NAV_BG': '#1A1E2E',
-        'TEXT': '#F2F4FA',
-        'TEXT_LIGHT': '#98A0B8',
+        'TEXT': '#FFFFFF',
+        'TEXT_LIGHT': '#A6AEC4',
         'DIVIDER': '#333A52',
         'PRIMARY': '#4A90D9',
         'PRIMARY_LIGHT': '#7FB8F0',
@@ -52,6 +52,9 @@ PALETTES = {
 
 DARK = True          # 当前是否深色模式
 _font_name = None    # 中文字体名
+
+# 全局字号系数（UI 文字普遍偏小，统一放大一点）
+FONT_SCALE = 1.15
 
 
 def _apply():

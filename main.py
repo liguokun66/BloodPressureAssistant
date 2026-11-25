@@ -25,11 +25,13 @@ from db import BPDB
 
 
 FONT_FILES = [
-    'NotoSansSC-Regular.otf',
-    'NotoSansSC-Regular.ttf',
-    'SimHei.ttf',
-    'DroidSansFallback.ttf',
-    'SourceHanSansSC-Regular.otf',
+    # 圆润中文字体（优先），找不到再依次回退
+    ('ZCOOLKuaiLe-Regular.ttf', 'ZCOOL KuaiLe'),
+    ('NotoSansSC-Regular.otf', 'NotoSansSC'),
+    ('NotoSansSC-Regular.ttf', 'NotoSansSC'),
+    ('SimHei.ttf', 'SimHei'),
+    ('DroidSansFallback.ttf', 'Droid Sans Fallback'),
+    ('SourceHanSansSC-Regular.otf', 'Source Han Sans SC'),
 ]
 
 
@@ -146,18 +148,103 @@ def register_chinese_font():
         os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets'),
         os.path.join(os.getcwd(), 'assets'),
     ]
-    for root in roots:
-        for name in FONT_FILES:
-            p = os.path.join(root, name)
-            if os.path.exists(p):
+    try:
+        from kivy.app import App
+        _ud = getattr(App.get_running_app(), 'user_data_dir', None)
+        if _ud:
+            roots.insert(0, os.path.join(_ud, 'assets'))
+    except Exception:
+        pass
+
+    def _try_roots():
+        for root in roots:
+            for fname, family in FONT_FILES:
+                pp = os.path.join(root, fname)
+                if os.path.exists(pp):
+                    try:
+                        LabelBase.register(family, pp)
+                        theme.set_font(family)
+                        return pp
+                    except Exception as e:
+                        print('[font] register failed:', fname, e)
+        return None
+
+    hit = _try_roots()
+    if hit:
+        return hit
+
+    # 兜底一：在应用目录里递归找（APK 内 assets 路径因打包方式而异）
+    base = os.path.dirname(os.path.abspath(__file__))
+    for fname, family in FONT_FILES:
+        for dirpath, _dirs, files in os.walk(base):
+            if dirpath.count(os.sep) - base.count(os.sep) > 3:
+                continue
+            if fname in files:
+                pp = os.path.join(dirpath, fname)
                 try:
-                    LabelBase.register('NotoSansSC', p)
-                    theme.set_font('NotoSansSC')
-                    return p
-                except Exception as e:
-                    print('[font] register failed:', name, e)
+                    LabelBase.register(family, pp)
+                    theme.set_font(family)
+                    return pp
+                except Exception:
+                    pass
+
+    # 兜底二：Android 上字体可能只在 APK assets 里，抽到磁盘再试
+    _dump_apk_assets_fonts()
+    hit = _try_roots()
+    if hit:
+        return hit
+
     print('[font] 未找到中文字体，请将字体放入 assets/ 目录')
     return None
+
+
+def _dump_apk_assets_fonts():
+    """Android 兼容：部分打包方式下 assets 只在 APK 内、不在文件系统。
+
+    从 AssetManager 把字体读出来写到 user_data_dir/assets，返回该目录。
+    """
+    try:
+        from kivy.app import App
+        app = App.get_running_app()
+        ud = getattr(app, 'user_data_dir', None)
+        if not ud:
+            return None
+        out = os.path.join(ud, 'assets')
+        from jnius import autoclass
+        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+        mgr = PythonActivity.mActivity.getAssets()
+        made = False
+        for fname, _family in FONT_FILES:
+            target = os.path.join(out, fname)
+            if os.path.exists(target):
+                continue
+            data = None
+            for prefix in ('assets/', ''):
+                try:
+                    stream = mgr.open(prefix + fname)
+                    buf = bytearray()
+                    while True:
+                        chunk = stream.read(65536)
+                        if not chunk:
+                            break
+                        buf.extend(chunk)
+                    stream.close()
+                    if len(buf) > 0:
+                        data = bytes(buf)
+                        break
+                except Exception:
+                    continue
+            if data:
+                try:
+                    os.makedirs(out, exist_ok=True)
+                    with open(target, 'wb') as f:
+                        f.write(data)
+                    made = True
+                except Exception as e:
+                    print('[font] dump asset failed:', fname, e)
+        return out if made else None
+    except Exception:
+        return None
 
 
 class Root(BoxLayout):

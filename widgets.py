@@ -26,7 +26,7 @@ def L(text, size=14, color=None, bold=False, align='left',
       valign='middle', markup=False, shorten=False,
       size_hint=None, width=None, height=None, expand=False):
     lbl = Label(
-        text=text, font_size=sp(size),
+        text=text, font_size=sp(size * theme.FONT_SCALE),
         color=C(color if color is not None else theme.TEXT),
         bold=bold, halign=align, valign=valign, markup=markup,
         font_name=theme.font(), shorten=shorten,
@@ -46,6 +46,34 @@ def L(text, size=14, color=None, bold=False, align='left',
             inst.text_size = (inst.width, None)
 
     lbl.bind(texture_size=_sz)
+    return lbl
+
+
+# ---------------- 可自动换行的文本 ----------------
+def WL(text, size=13, color=None, bold=False, align='left',
+       valign='top', markup=False):
+    """宽度随父容器、高度跟随内容的换行标签（避免长文被截断）。"""
+    lbl = Label(
+        text=text, font_size=sp(size * theme.FONT_SCALE),
+        color=C(color if color is not None else theme.TEXT),
+        bold=bold, halign=align, valign=valign, markup=markup,
+        font_name=theme.font(), size_hint=(1, None),
+    )
+
+    def _h(inst, val):
+        inst.height = val[1] + dp(4)
+
+    def _wrap(inst, val):
+        # 宽度变化时限定 text_size，让多行文本正常折行
+        try:
+            w = val[0]
+        except TypeError:
+            w = val
+        if w > 1:
+            inst.text_size = (w, None)
+
+    lbl.bind(texture_size=_h)
+    lbl.bind(width=_wrap)
     return lbl
 
 
@@ -123,7 +151,7 @@ def B(text, bg=None, color=None, size=15, height=46, radius=10,
       markup=False, font_name=None):
     bg = bg if bg is not None else theme.PRIMARY
     kwargs = dict(
-        text=text, font_size=sp(size), bold=bold,
+        text=text, font_size=sp(size * theme.FONT_SCALE), bold=bold,
         font_name=font_name or theme.font(),
         markup=markup,
         size_hint_y=size_hint_y, height=dp(height),
@@ -275,7 +303,8 @@ class FieldInput(TextInput):
 def TI(hint='', text='', size=15, input_type='number', multiline=False,
        readonly=False, height=50, fg=None):
     return FieldInput(
-        hint_text=hint, text=text, font_size=sp(size), input_type=input_type,
+        hint_text=hint, text=text, font_size=sp(size * theme.FONT_SCALE),
+        input_type=input_type,
         multiline=multiline, readonly=readonly,
         size_hint_y=None, height=dp(height),
         foreground_color=C(fg if fg is not None else theme.TEXT),
@@ -306,10 +335,10 @@ class NavTab(ButtonBehavior, BoxLayout):
                                         radius=[dp(12)])
         self.ic = Label(
             text='[font=%s]%s[/font]' % (icons.FONT_NAME, icons.ic(icon)),
-            markup=True, font_name=theme.font(), font_size=sp(19),
+            markup=True, font_name=theme.font(), font_size=sp(21),
             color=C(theme.TEXT_LIGHT))
         self.tx = Label(text=label, font_name=theme.font(),
-                        font_size=sp(12.5), bold=True,
+                        font_size=sp(13.5), bold=True,
                         color=C(theme.TEXT_LIGHT))
         self.add_widget(self.ic)
         self.add_widget(self.tx)
@@ -623,6 +652,111 @@ class VoiceWave(Widget):
                 y = self.center_y - bh / 2.0
                 RoundedRectangle(pos=(x, y), size=(bw, bh),
                                  radius=[bw / 2] * 4)
+
+
+# ---------------- 日期选择卡片 ----------------
+def pick_date(current='', on_pick=None, title='选择日期'):
+    """弹出月份日期卡片：点选某天即以 'YYYY-MM-DD' 回调。
+
+    on_pick(text) 传 None 时只关闭。
+    """
+    from kivy.uix.popup import Popup
+    from kivy.uix.gridlayout import GridLayout
+    from datetime import datetime, timedelta
+
+    s = (current or '').strip()[:10]
+    try:
+        cur = datetime.strptime(s, '%Y-%m-%d')
+    except Exception:
+        cur = datetime.now()
+
+    state = {'y': cur.year, 'm': cur.month, 'sel': cur}
+
+    body = BoxLayout(orientation='vertical', padding=dp(16), spacing=dp(10))
+    top = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+    top.add_widget(L(title, 14, theme.TEXT_LIGHT))
+    top.add_widget(L('', 1, theme.TEXT))     # 占位，让标题居左
+    ym = L('%d 年 %d 月' % (state['y'], state['m']), 18, theme.TEXT, bold=True)
+    top.add_widget(ym)
+    nav = BoxLayout(size_hint_x=None, width=dp(92), spacing=dp(6))
+    b_prev = B('‹', bg=theme.CARD_LIGHT, color=theme.TEXT, size=18,
+               height=40, radius=10, size_hint_x=None, width=dp(40))
+    b_next = B('›', bg=theme.CARD_LIGHT, color=theme.TEXT, size=18,
+               height=40, radius=10, size_hint_x=None, width=dp(40))
+    nav.add_widget(b_prev)
+    nav.add_widget(b_next)
+    top.add_widget(nav)
+    body.add_widget(top)
+
+    week = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(4))
+    for i, wd in enumerate(['一', '二', '三', '四', '五', '六', '日']):
+        week.add_widget(L(wd, 13, theme.TEXT_LIGHT, align='center'))
+    body.add_widget(week)
+
+    grid = GridLayout(cols=7, spacing=dp(5), size_hint_y=None,
+                      height=dp(44) * 6)
+    body.add_widget(grid)
+
+    def shift(delta):
+        y, m = state['y'], state['m'] + delta
+        while m < 1:
+            m += 12
+            y -= 1
+        while m > 12:
+            m -= 12
+            y += 1
+        state['y'], state['m'] = y, m
+        rebuild()
+
+    def rebuild(*a):
+        ym.text = '%d 年 %d 月' % (state['y'], state['m'])
+        grid.clear_widgets()
+        first = datetime(state['y'], state['m'], 1)
+        lead = first.weekday()          # 周一=0
+        days = (datetime(state['y'] + (state['m'] == 12),
+                         state['m'] % 12 + 1, 1) - first).days
+        rows = (lead + days + 6) // 7
+        grid.height = dp(44) * rows
+        for _i in range(lead):
+            grid.add_widget(L('', 14))
+        for d in range(1, days + 1):
+            dt = datetime(state['y'], state['m'], d)
+            sel = (dt.date() == state['sel'].date())
+            b = B(str(d), bg=(theme.PRIMARY if sel else theme.CARD_LIGHT),
+                  color=('#FFFFFF' if sel else theme.TEXT), size=15,
+                  height=dp(42), radius=10, bold=sel)
+            b.bind(on_press=lambda inst, x=dt: choose(x))
+            grid.add_widget(b)
+
+    def choose(dt):
+        state['sel'] = dt
+        rebuild()
+        txt = dt.strftime('%Y-%m-%d')
+        if on_pick is not None:
+            try:
+                on_pick(txt)
+            except Exception:
+                pass
+        popup.dismiss()
+
+    b_prev.bind(on_press=lambda inst: shift(-1))
+    b_next.bind(on_press=lambda inst: shift(1))
+
+    foot = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+    foot.add_widget(B('取消', bg=theme.CARD_LIGHT, color=theme.TEXT,
+                      height=46, radius=12,
+                      on_press=lambda inst: popup.dismiss()))
+    foot.add_widget(B('今天', bg=theme.PRIMARY, height=46, radius=12,
+                      on_press=lambda inst: choose(datetime.now())))
+    body.add_widget(foot)
+
+    popup = Popup(title='', content=body, size_hint=(0.92, None),
+                  height=dp(480), auto_dismiss=True,
+                  background='', background_color=C(theme.BG2),
+                  separator_color=C(theme.DIVIDER))
+    rebuild()
+    popup.open()
+    return popup
 
 
 # ---------------- 弹窗 ----------------

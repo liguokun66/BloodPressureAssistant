@@ -12,6 +12,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.widget import Widget
 from kivy.uix.switch import Switch
 from kivy.graphics import Color, RoundedRectangle, Rectangle, Ellipse, Line
@@ -22,14 +23,37 @@ import theme
 import icons
 from appinfo import APP_NAME, APP_VERSION
 import share
+import model_store
 from theme import C
-from widgets import (L, B, Card, TopBar, TI, BarChart, LineChart,
-                     confirm_dialog, message_dialog, VoiceWave)
+from widgets import (L, WL, B, Card, TopBar, TI, BarChart, LineChart,
+                     confirm_dialog, message_dialog, VoiceWave, pick_date)
 from voice_parser import parse_voice_text, validate
 from voice import VoiceRecognizer
 
 
 # ---------------- 工具 ----------------
+def open_date_picker(field, title='选择日期'):
+    """让输入框点击时弹出日期卡片（保留手动输入能力）。"""
+    def cb(txt):
+        field.text = txt
+        try:
+            field.cancel_focus()
+        except Exception:
+            pass
+    pick_date(field.text, on_pick=cb, title=title)
+
+
+def make_date_field(ti, title='选择日期'):
+    """点击输入框即弹出日期卡片（不影响代码赋值）。"""
+    _orig = ti.on_touch_down
+
+    def _h(touch):
+        if ti.collide_point(*touch.pos):
+            open_date_picker(ti, title)
+            return True
+        return _orig(touch)
+    ti.on_touch_down = _h
+    return ti
 def short_time(t):
     """'2026-11-23 10:30:00' -> '11-23 10:30'"""
     return t[5:16] if t else ''
@@ -569,6 +593,7 @@ class AddScreen(Screen):
         row = BoxLayout(spacing=dp(10))
         self.d_in = TI(text='', height=44)
         self.t_in = TI(text='', height=44)
+        make_date_field(self.d_in, '选择测量日期')
         row.add_widget(self.d_in)
         row.add_widget(self.t_in)
         c.add_widget(row)
@@ -657,6 +682,19 @@ class AddScreen(Screen):
         self.add_widget(root)
         self.vr = None
         self.bind(on_pre_enter=lambda *a: self._enter())
+        self.bind(on_leave=lambda *a: self._leave())
+
+    def _leave(self):
+        """离开页面时结束语音会话：否则切走再回来仍停在“聆听中”。"""
+        vr, self.vr = self.vr, None
+        self._voice_wait = False
+        try:
+            if vr is not None:
+                vr.stop()
+        except Exception:
+            pass
+        self._set_listening(False)
+        self.status.text = '说：「高压一百二，低压八十，脉搏七十二」'
 
     def _enter(self):
         rid = getattr(self.app, 'editing_id', None)
@@ -914,6 +952,8 @@ class AnalysisScreen(Screen):
         r = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
         self.c_start = TI(hint='开始 2026-11-01', height=44)
         self.c_end = TI(hint='结束 2026-11-23', height=44)
+        make_date_field(self.c_start, '选择开始日期')
+        make_date_field(self.c_end, '选择结束日期')
         r.add_widget(self.c_start)
         r.add_widget(self.c_end)
         self.custom_card.add_widget(r)
@@ -1147,13 +1187,12 @@ class ArtIcon(Widget):
 
 
 class ArticleCard(BoxLayout):
-    """彩色大圆角科普卡片：左侧标题 + 右侧矢量插画"""
+    """彩色大圆角科普卡片：左侧标题 + 右侧矢量插画（高度随内容自适应）"""
 
     def __init__(self, art, on_open, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = dp(96)
         self.padding = [dp(14), dp(10)]
         self.spacing = dp(12)
         with self.canvas.before:
@@ -1163,15 +1202,22 @@ class ArticleCard(BoxLayout):
         self.bind(pos=self._u, size=self._u)
         left = BoxLayout(orientation='vertical', spacing=dp(5), size_hint_x=1,
                          padding=[0, dp(8)])
-        left.add_widget(L(art['title'], 16, '#FFFFFF', bold=True))
-        left.add_widget(L(art['summary'], 11, (1, 1, 1, 0.88)))
+        left.add_widget(WL(art['title'], 17, '#FFFFFF', bold=True,
+                           valign='middle'))
+        left.add_widget(WL(art['summary'], 12, (1, 1, 1, 0.9)))
         self.add_widget(left)
-        wrap = BoxLayout(size_hint_x=None, width=dp(56),
-                         padding=[0, dp(19)])
-        wrap.add_widget(ArtIcon(art.get('kind', 'heart')))
+        wrap = AnchorLayout(size_hint_x=None, width=dp(60),
+                            anchor_x='center', anchor_y='center')
+        icon = ArtIcon(art.get('kind', 'heart'))
+        wrap.add_widget(icon)
         self.add_widget(wrap)
         self.bind(on_touch_down=self._tap)
         self._on_open = on_open
+        # 高度跟随内容（标题/摘要可能多行）
+        left.bind(minimum_height=lambda inst, val: setattr(
+            inst, 'height', val))
+        self.bind(minimum_height=lambda inst, val: setattr(
+            inst, 'height', val))
 
     def _u(self, *a):
         self._bg.pos = self.pos
@@ -1246,24 +1292,25 @@ class ArticleScreen(Screen):
         self.topbar.title_lbl.text = art['title']
         self.body.clear_widgets()
         head = BoxLayout(orientation='vertical', size_hint_y=None,
-                          height=dp(78), spacing=dp(6),
-                          padding=[dp(14), dp(12)])
+                          spacing=dp(6), padding=[dp(14), dp(12)])
         with head.canvas.before:
             Color(rgba=C(art['color']))
             self._hbg = RoundedRectangle(pos=head.pos, size=head.size,
                                          radius=[dp(16)])
         head.bind(pos=self._hupd, size=self._hupd)
-        head.add_widget(L(icons.im(icons.KIND_ICON.get(art.get('kind'), 'heart'))
-                          + '  ' + art['title'], 19,
-                          '#FFFFFF', bold=True, markup=True))
-        head.add_widget(L(art['summary'], 12, (1, 1, 1, 0.9)))
+        head.bind(minimum_height=lambda inst, val: setattr(
+            inst, 'height', val))
+        head.add_widget(WL(icons.im(icons.KIND_ICON.get(art.get('kind'), 'heart'))
+                           + '  ' + art['title'], 20,
+                           '#FFFFFF', bold=True, markup=True))
+        head.add_widget(WL(art['summary'], 13, (1, 1, 1, 0.92)))
         self.body.add_widget(head)
         card = Card()
         self.body.add_widget(card)
-        # 用卡片承载正文
+        # 用卡片承载正文（WL：跟随宽度自动换行，不再被截断）
         for sub, para in art['body']:
-            card.add_widget(L(sub, 15, theme.PRIMARY, bold=True))
-            card.add_widget(L(para, 14, theme.TEXT))
+            card.add_widget(WL(sub, 16, theme.PRIMARY, bold=True))
+            card.add_widget(WL(para, 15, theme.TEXT))
         self.body.add_widget(L('内容仅供健康参考，不构成医疗诊断。',
                                11, theme.TEXT_LIGHT))
 
@@ -1305,6 +1352,19 @@ class ProfileScreen(Screen):
                                 color=theme.DANGER))
         body.add_widget(c2)
 
+        # 语音识别模型
+        c4 = Card()
+        c4.add_widget(L('语音识别模型', 15, theme.TEXT, bold=True))
+        self.model_label = L('', 12, theme.TEXT_LIGHT)
+        c4.add_widget(self.model_label)
+        self.model_btn = B('', bg=theme.PRIMARY, height=44, size=13, radius=10,
+                           on_press=lambda i: self.model_action())
+        c4.add_widget(self.model_btn)
+        c4.add_widget(L('高精度模型需联网下载（约 1.27 GB），下载后自动启用；\n'
+                        '需要较多运行内存，建议 4GB 以上的手机。',
+                        11, theme.TEXT_LIGHT))
+        body.add_widget(c4)
+
         # 关于（APP_VERSION 需与 GitHub Release 标签保持一致）
         c3 = Card()
         c3.add_widget(L('关于', 15, theme.TEXT, bold=True))
@@ -1316,6 +1376,139 @@ class ProfileScreen(Screen):
                         12, theme.TEXT_LIGHT))
         body.add_widget(c3)
         self.add_widget(root)
+        self._dl = None
+        self._mp = None
+        self.bind(on_pre_enter=lambda *a: self.refresh_model())
+
+    # ---------------- 语音模型 ----------------
+    def refresh_model(self):
+        try:
+            ready = model_store.large_ready()
+        except Exception:
+            ready = False
+        cur_large = (model_store.quality() == 'large' and ready)
+        if ready:
+            self.model_label.text = ('当前：%s（%s）\n备用：%s'
+                                     % (model_store.LARGE['label'],
+                                        model_store.LARGE['desc'],
+                                        model_store.SMALL['label']))
+            self.model_btn.text = ('切回内置小模型' if cur_large
+                                   else '启用高精度模型')
+        else:
+            self.model_label.text = ('当前：%s（%s）\n未下载高精度模型'
+                                     % (model_store.SMALL['label'],
+                                        model_store.SMALL['desc']))
+            self.model_btn.text = '下载高精度模型'
+
+    def model_action(self):
+        try:
+            ready = model_store.large_ready()
+        except Exception:
+            ready = False
+        cur_large = (model_store.quality() == 'large' and ready)
+        if not ready:
+            self.start_model_download()
+            return
+        if cur_large:
+            model_store.set_quality('small')
+        else:
+            model_store.set_quality('large')
+        self.refresh_model()
+        message_dialog('已切换',
+                       '当前使用：%s' % model_store.info()['label'])
+
+    def _post(self, fn, *a):
+        try:
+            Clock.schedule_once(lambda dt: fn(*a), 0)
+        except Exception:
+            fn(*a)
+
+    def start_model_download(self):
+        if self._dl is not None:
+            return
+        self._open_model_popup()
+        outer = self
+
+        def on_prog(received, total):
+            def ui(dt):
+                pct = int(received * 100.0 / total) if total else 0
+                outer._mp_bar.value = pct
+                outer._mp_msg.text = ('已下载 %.1f MB / %.1f MB（%d%%）'
+                                      % (received / 1048576.0,
+                                         total / 1048576.0, pct))
+            Clock.schedule_once(ui, 0)
+
+        def on_done(path):
+            def ui(dt):
+                try:
+                    outer._mp.dismiss()
+                except Exception:
+                    pass
+                outer._dl = None
+                try:
+                    model_store.set_quality('large')
+                except Exception:
+                    pass
+                outer.refresh_model()
+                message_dialog('高精度模型已就绪',
+                               '已下载并启用高精度中文模型。\n下次语音识别会自动使用它。')
+            Clock.schedule_once(ui, 0)
+
+        def on_error(msg):
+            def ui(dt):
+                try:
+                    outer._mp.dismiss()
+                except Exception:
+                    pass
+                outer._dl = None
+                message_dialog('下载失败', msg)
+            Clock.schedule_once(ui, 0)
+
+        try:
+            self._dl = model_store.ModelDownloader(
+                on_progress=on_prog, on_done=on_done, on_error=on_error)
+            self._dl.start()
+            self._mp_title.text = '正在下载高精度模型…'
+            self._mp_msg.text = ('请保持应用在前台与网络连接，\n'
+                                 '下载约 1.27 GB，耗时较长。')
+        except Exception as e:
+            self._dl = None
+            message_dialog('无法开始下载', str(e))
+
+    def _open_model_popup(self):
+        from kivy.uix.popup import Popup
+        from kivy.uix.progressbar import ProgressBar
+        content = BoxLayout(orientation='vertical', padding=dp(18),
+                             spacing=dp(12))
+        self._mp_title = L('准备下载…', 15, theme.TEXT, bold=True)
+        self._mp_bar = ProgressBar(max=100, value=0, size_hint_y=None,
+                                   height=dp(18))
+        self._mp_msg = L('', 12, theme.TEXT_LIGHT)
+        cancel = B('取消下载', bg=theme.CARD_LIGHT, color=theme.TEXT,
+                   height=44, radius=12)
+        content.add_widget(self._mp_title)
+        content.add_widget(self._mp_bar)
+        content.add_widget(self._mp_msg)
+        content.add_widget(cancel)
+        self._mp = Popup(title='高精度语音模型', content=content,
+                         size_hint=(0.9, None), height=dp(220),
+                         auto_dismiss=False, background='',
+                         background_color=C(theme.BG2),
+                         separator_color=C(theme.PRIMARY))
+        cancel.bind(on_press=lambda inst: self.cancel_download())
+        self._mp.bind(on_dismiss=lambda *a: self.cancel_download())
+        self._mp.open()
+
+    def cancel_download(self):
+        if self._dl is not None:
+            try:
+                self._dl.cancel()
+            except Exception:
+                pass
+        try:
+            self._mp.dismiss()
+        except Exception:
+            pass
 
     def _btn(self, text, method, color=None):
         return B(text, bg=theme.CARD_LIGHT, color=color or theme.TEXT,
@@ -1326,14 +1519,13 @@ class ProfileScreen(Screen):
     _CSV_REQ = 4242
 
     def export_csv(self):
+        """默认导出到应用数据目录（文件名带时间戳 + .csv），随后调起系统分享。"""
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
         name = 'bp_export_%s.csv' % ts
-        tmp = os.path.join(self.app.user_data_dir, name)
+        path = os.path.join(self.app.user_data_dir, name)
         try:
-            self.app.db.export_csv(tmp)
+            self.app.db.export_csv(path)
             n = len(self.app.db.get_all())
-            with open(tmp, 'rb') as f:
-                blob = f.read()
         except Exception as e:
             message_dialog('导出失败', str(e))
             return
@@ -1342,41 +1534,24 @@ class ProfileScreen(Screen):
             is_android = (platform == 'android')
         except Exception:
             is_android = False
-        if not is_android:
+        if is_android:
             shared = False
             try:
-                shared = share.share_file(tmp, title='分享血压数据')
+                shared = share.share_file(path, title='分享血压数据')
             except Exception:
                 shared = False
             if shared:
-                message_dialog('导出成功',
-                               '已导出 %d 条记录，系统分享面板已打开，\n'
-                               '可选择微信、邮件等应用发送。' % n)
+                message_dialog(
+                    '导出成功',
+                    '已导出 %d 条记录：\n%s\n\n已调起系统分享面板，可发送到微信 / 邮箱。'
+                    % (n, name))
             else:
                 message_dialog('导出成功',
-                               '已导出 %d 条记录：\n%s' % (n, tmp))
+                               '已导出 %d 条记录：\n%s' % (n, path))
             return
-        # Android：SAF 系统选择器（默认文件名，可改目录/文件名）
-        self._csv_pending = (name, blob, n)
-        try:
-            from jnius import autoclass
-            Intent = autoclass('android.content.Intent')
-            PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
-            intent.addCategory(Intent.CATEGORY_OPENABLE)
-            intent.setType('text/csv')
-            intent.putExtra(Intent.EXTRA_TITLE, name)
-            activity = PythonActivity.mActivity
-            from android import activity as _act
-            _act.bind(on_activity_result=self._on_csv_result)
-            activity.startActivityForResult(intent, self._CSV_REQ)
-            return
-        except Exception:
-            pass
-        # 回退：留在应用目录并尝试分享
         shared = False
         try:
-            shared = share.share_file(tmp, title='分享血压数据')
+            shared = share.share_file(path, title='分享血压数据')
         except Exception:
             shared = False
         if shared:
@@ -1384,35 +1559,7 @@ class ProfileScreen(Screen):
                            '已导出 %d 条记录，系统分享面板已打开。' % n)
         else:
             message_dialog('导出成功',
-                           '已导出 %d 条记录：\n%s' % (n, tmp))
-
-    def _on_csv_result(self, request_code, result_code, data):
-        if request_code != self._CSV_REQ:
-            return
-        pending = getattr(self, '_csv_pending', None)
-        self._csv_pending = None
-        if pending is None:
-            return
-        name, blob, n = pending
-        if result_code == -1 and data is not None:   # RESULT_OK
-            try:
-                from jnius import autoclass
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                cr = PythonActivity.mActivity.getContentResolver()
-                uri = data.getData()
-                out = cr.openOutputStream(uri)
-                out.write(bytearray(blob))
-                out.flush()
-                out.close()
-                message_dialog('导出成功',
-                               '已保存 %d 条记录到所选位置。' % n)
-                return
-            except Exception as e:
-                message_dialog('保存失败', str(e))
-                return
-        tmp = os.path.join(self.app.user_data_dir, name)
-        message_dialog('已取消',
-                       '未选择保存位置。文件仍在应用目录：\n%s' % tmp)
+                           '已导出 %d 条记录：\n%s' % (n, path))
 
     def backup_db(self):
         try:

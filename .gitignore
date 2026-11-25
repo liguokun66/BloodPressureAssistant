@@ -8,3 +8,4 @@ t_*.py
 
 models/
 libs/
+vosk-model/

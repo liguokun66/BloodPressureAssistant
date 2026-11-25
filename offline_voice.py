@@ -30,6 +30,23 @@ ASSET_MODEL_DIR = 'vosk-model'
 SAMPLE_RATE = 16000.0
 
 
+def _selected_model_dir():
+    """当前选择的模型目录：高精度（若已下载且被选中）或内置小模型。"""
+    try:
+        import model_store
+        return model_store.model_dir()
+    except Exception:
+        pass
+    try:
+        from kivy.app import App
+        app = App.get_running_app()
+        base = getattr(app, 'user_data_dir', None) or os.path.dirname(
+            os.path.abspath(__file__))
+    except Exception:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, ASSET_MODEL_DIR)
+
+
 def _run_on_ui(fn):
     """在 Android 主（UI）线程执行 fn；拿不到 activity 时在当前线程执行。"""
     try:
@@ -152,14 +169,7 @@ class VoskOfflineRecognizer:
 
     @staticmethod
     def model_dir():
-        try:
-            from kivy.app import App
-            app = App.get_running_app()
-            base = getattr(app, 'user_data_dir', None) or os.path.dirname(
-                os.path.abspath(__file__))
-        except Exception:
-            base = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(base, 'vosk-model')
+        return _selected_model_dir()
 
     @staticmethod
     def _model_files_ok(d):
@@ -196,9 +206,12 @@ class VoskOfflineRecognizer:
 
     # ---------------- 模型准备 ----------------
     def _ensure_model(self):
-        """确保 user_data_dir/vosk-model 存在且完整；返回 Model 或抛异常。"""
+        """确保所选模型存在且完整；返回 Model 或抛异常。"""
         d = self.model_dir()
         if not self._model_files_ok(d):
+            # 只有内置小模型可以从 assets 解压；高精度模型需先下载
+            if os.path.basename(d) != ASSET_MODEL_DIR:
+                raise RuntimeError('HIGH_MODEL_MISSING')
             self._copy_assets(d)
         Model = self._jc('_ClsModel', 'org.vosk.Model')
         return Model(d)
