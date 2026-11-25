@@ -63,6 +63,10 @@ def _run_on_ui(fn):
 class VoskOfflineRecognizer:
     """Vosk 离线识别封装（仅 Android）。"""
 
+    # 所有尚未释放完的实例：同一时刻只允许一个 AudioRecord 打开，
+    # 否则第二次 startListening 可能抢不到麦克风（甚至触发 native 异常）
+    _INFLIGHT = []
+
     def __init__(self, on_result=None, on_partial=None, on_error=None,
                  on_ready=None):
         self._on_result = on_result
@@ -77,6 +81,20 @@ class VoskOfflineRecognizer:
         self._started = False
         self._failed = False
         self._primed = False
+        self._shutting_down = False   # shutdown 幂等，防重复释放 native
+        self._final_done = False      # 已收最终结果：onResult 不再重复上报
+        self._seg_texts = []          # 本次会话已识别出的片段（端点检测会切段）
+        VoskOfflineRecognizer._INFLIGHT.append(self)
+
+    def _release_others(self):
+        """把还没释放完的旧会话就地清掉（在 Kivy 主线程调用，同步完成）。"""
+        for other in list(VoskOfflineRecognizer._INFLIGHT):
+            if other is self or other._shutting_down:
+                continue
+            try:
+                other.shutdown()
+            except Exception:
+                pass
 
     # ---------------- Java 类解析（必须在主线程） ----------------
     def _jc(self, attr, name):
@@ -237,6 +255,7 @@ class VoskOfflineRecognizer:
     def start(self):
         if self.busy():
             return
+        self._release_others()
         if not self.supported():
             self._fire_error('设备不支持离线语音引擎。')
             return
@@ -287,6 +306,7 @@ class VoskOfflineRecognizer:
             SpeechService = self._jc('_ClsSpeechService',
                                      'org.vosk.android.SpeechService')
             self._recognizer = Recognizer(model, SAMPLE_RATE)
+            self._configure_recognizer(self._recognizer)
             kbdbg.KB['vk'] = 'service'
             self._service = SpeechService(self._recognizer, SAMPLE_RATE)
             kbdbg.KB['vk'] = 'listen'
@@ -309,6 +329,20 @@ class VoskOfflineRecognizer:
             self._fire_error('OFFLINE_START_FAIL:%s:%s'
                              % (type(e).__name__, e))
 
+    def _configure_recognizer(self, rec):
+        """解码器调优：默认端点检测约 1s 没说话就把句子截断，导致「高压…低压…」
+        这类长句被切成几段、只剩最后一段。调成 LONG 让它等更久；
+        我们本身是按住说话（松手才停），所以拉长不会带来副作用。
+        """
+        try:
+            rec.setEndpointerMode(2)   # 0=DEFAULT 1=SHORT 2=LONG 3=VERY_LONG
+        except Exception as e:
+            Logger.info('vosk: setEndpointerMode 失败 %s' % e)
+        try:
+            rec.setWords(True)         # 输出词级结果，便于后续利用
+        except Exception as e:
+            Logger.info('vosk: setWords 失败 %s' % e)
+
     def stop(self):
         """松手结束：取最终识别结果（onFinalResult 回调）。"""
         service, self._service = self._service, None
@@ -318,33 +352,81 @@ class VoskOfflineRecognizer:
         _run_on_ui(lambda: service.stop())
 
     def cancel(self):
+        """取消本次识别（不停模型），回 final；空文本不算错误。"""
         service, self._service = self._service, None
         self._started = False
         if service is not None:
             _run_on_ui(service.cancel)
 
     def shutdown(self):
+        """彻底释放资源；多次调用安全。
+
+        顺序重要：先停掉 Vosk 的识别线程（内部会 join），再释放 native
+        recognizer，最后释放 AudioRecord。反过来做（边收音频边 free）是
+        真机偶发闪退的典型成因。
+        """
+        if (self._shutting_down and self._service is None
+                and self._recognizer is None):
+            return
+        self._shutting_down = True
         service, self._service = self._service, None
         rec, self._recognizer = self._recognizer, None
         self._started = False
-        if rec is not None:
-            _run_on_ui(rec.close)
-        if service is not None:
-            _run_on_ui(service.shutdown)
+        if rec is None and service is None:
+            return
+
+        def task():
+            try:
+                if service is not None:
+                    service.stop()        # interrupt + join 工作线程
+            except Exception:
+                pass
+            try:
+                if rec is not None:
+                    rec.close()
+            except Exception:
+                pass
+            try:
+                if service is not None:
+                    service.shutdown()    # 释放 AudioRecord
+            except Exception:
+                pass
+            try:
+                if self in VoskOfflineRecognizer._INFLIGHT:
+                    VoskOfflineRecognizer._INFLIGHT.remove(self)
+            except Exception:
+                pass
+        _run_on_ui(task)
 
     def _cleanup_java(self):
-        rec, self._recognizer = self._recognizer, None
-        svc, self._service = self._service, None
-        if rec is not None:
-            try:
-                rec.close()
-            except Exception:
-                pass
-        if svc is not None:
-            try:
-                svc.shutdown()
-            except Exception:
-                pass
+        """异常路径的统一释放入口（异步、与 shutdown 同序）"""
+        self.shutdown()
+
+    def _defer_shutdown(self, delay=0.35):
+        """把释放动作挪出 Vosk 的 Java 回调线程。
+
+        onFinalResult/onError/onTimeout 都运行在 Vosk 自己的工作线程里，
+        在那里原地 close()/shutdown() 会在回调线程内 join/释放 native，
+        真机上偶发 SIGSEGV 闪退。延迟到 Kivy 主循环再释放即可避开。
+        """
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        try:
+            Clock.schedule_once(lambda dt: self._safe_shutdown(), delay)
+        except Exception:
+            self._safe_shutdown()
+
+    def _safe_shutdown(self):
+        try:
+            self.shutdown()
+        except Exception:
+            Logger.info('vosk: shutdown 异常\n%s'
+                        % __import__('traceback').format_exc())
+
+    def _cleanup_java(self):
+        """异常路径的统一释放入口（异步、与 shutdown 同序）"""
+        self.shutdown()
 
     # ---------------- 结果解析 ----------------
     @staticmethod
@@ -364,21 +446,46 @@ class VoskOfflineRecognizer:
         if text:
             self._fire_partial(text)
 
+    @staticmethod
+    def _merge_segments(segments):
+        """拼接多个识别片段，去掉完全重复 / 已被包含的段。"""
+        out = []
+        for seg in segments:
+            seg = (seg or '').strip()
+            if not seg:
+                continue
+            if out and (seg == out[-1] or out[-1].endswith(seg)):
+                continue
+            out.append(seg)
+        return ''.join(out)
+
     def on_result(self, hypothesis):
+        """一段（utterance）结束：Vosk 会在每次静音后回调。这里只做累积，
+        不当作最终结果，避免一句长句被切成几段后只保留最后一段。"""
+        if self._final_done:
+            return
         text = self._extract_text(hypothesis, 'text')
         if text:
-            self._fire_result(text)
+            self._seg_texts.append(text)
+            self._fire_partial(self._merge_segments(self._seg_texts))
 
     def on_final(self, hypothesis):
+        """识别结束：把所有片段拼成完整句子再上报一次。"""
+        self._final_done = True
         self._started = False
         text = self._extract_text(hypothesis, 'text')
         if text:
-            self._fire_result(text)
+            self._seg_texts.append(text)
+        merged = self._merge_segments(self._seg_texts)
+        self._seg_texts = []
+        if merged:
+            self._fire_result(merged)
         else:
             self._fire_error('没有听到清晰语音，请按住按钮重说。')
-        self.shutdown()
+        self._defer_shutdown()
 
     def on_error(self, exc):
+        self._final_done = True
         self._started = False
         msg = ''
         try:
@@ -386,11 +493,13 @@ class VoskOfflineRecognizer:
         except Exception:
             msg = str(exc)
         self._fire_error('离线识别出错：%s' % (msg or type(exc).__name__))
-        self.shutdown()
+        self._defer_shutdown()
 
     def on_timeout(self):
+        self._final_done = True
         self._started = False
         self._fire_error('说话超时，请重试。')
+        self._defer_shutdown()
 
 
 # ---------------- RecognitionListener 的 Python 实现 ----------------

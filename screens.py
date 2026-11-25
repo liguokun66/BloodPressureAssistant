@@ -449,7 +449,7 @@ class HomeScreen(Screen):
             on_result=self._quick_result,
             on_partial=self._quick_partial,
             on_error=self._quick_err,
-            on_ready=lambda: self._quick_status('正在输入… 请继续说'))
+            on_ready=lambda: self._quick_status('正在听：请说「高压X 低压Y 脉搏Z」'))
         self.vr.start()
 
     def stop_voice(self):
@@ -758,7 +758,7 @@ class AddScreen(Screen):
             on_result=self.on_voice,
             on_partial=self._on_partial,
             on_error=self.on_voice_err,
-            on_ready=lambda: self.set_status('正在输入… 请继续说'))
+            on_ready=lambda: self.set_status('正在听：请说「高压X 低压Y 脉搏Z」'))
         self.vr.start()
 
     def _on_partial(self, text):
